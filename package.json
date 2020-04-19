@@ -1,0 +1,19 @@
+{
+  "name": "farmyard-fight-club",
+  "version": "0.0.1",
+  "description": "Farmyard Fight Club - A Three.js 3D Coronavirus Codealong",
+  "author": "Jared Colby <jaredkcolby@gmail.com>",
+  "homepage": "https://github.com/jaredcolby/farmyard-fight-club",
+  "contributors": [
+    {
+      "name": "Alberto Wondracek",
+      "url": "https://github.com/awondracek"
+    }
+  ],
+  "scripts": {
+    "start": "reload -b"
+  },
+  "devDependencies": {
+    "reload": "^3.0.4"
+  }
+}

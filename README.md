@@ -20,10 +20,10 @@ cd farmyard-fight-club
 atom .
 
 # Recommended: install 'reload' package
-npm install -g reload
+npm install
 
 # Start reload server
-reload
+npm run start
 
 # (NOTHING TO SEE YET)
 # (AWAIT FURTHER INSTRUCTIONS)
