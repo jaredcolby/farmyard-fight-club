@@ -11,6 +11,7 @@ app.initKeys = () => {
       ArrowLeft: true,
       ArrowRight: true,
       c: true,   // toggle camera POV from world to player
+      " ": true,
     },
 
     state: {},  // which keys are currently held?
@@ -20,26 +21,46 @@ app.initKeys = () => {
 
     const player = Player.one;
 
-    switch( ev.key ){
+    switch( ev.key || ev.keyCode){
 
     case 'ArrowUp':
       if( pressed ){
+        app.sounds.walk.audio.setPlaybackRate(app.sounds.walk.rate)
         player.changeState('walk');
         app.sounds.walk.audio.play();
       } else {
-        player.changeState('idle');
         app.sounds.walk.audio.stop();
+        player.changeState('idle');
       }
       break;
 
     case 'ArrowDown':
       if( pressed ){
         console.log('DOWN pressed!');
-        // TODO: work out in changeState how to pass on the correct
-        // options object to the call the changeAnimation
-        player.changeState('walk', { speedScale: -1} );
+        // TODO: how to sync up audio rate with animation rate?;
+        app.sounds.walk.audio.setPlaybackRate(.5)
+        app.sounds.walk.audio.play();
+        // passes in a object with walkSpeed/timeScale as a negative values to reverse the direction.
+        player.changeState('walk', { walkSpeed: -.30, timeScale: -1 } );
       } else {
         console.log('DOWN released!');
+        app.sounds.walk.audio.stop();
+        player.changeState('idle');
+      }
+      break;
+
+    case " ":
+      if( pressed ){
+        console.log('SPACEBAR pressed!');
+        // TODO: how to sync up audio rate with animation rate?;
+        app.sounds.walk.audio.setPlaybackRate(.5)
+        app.sounds.walk.audio.play();
+        // passes in a object with walkSpeed/timeScale as a negative values to reverse the direction.
+        player.changeState('jump');
+      } else {
+        console.log('SPACEBAR released!');
+        app.sounds.walk.audio.stop(); 
+        player.changeState('idle');
       }
       break;
 
@@ -73,6 +94,7 @@ app.initKeys = () => {
 
     default:
       console.log('Key not handled: ', ev.key);
+      console.log('Key not handled: ', ev);
       break;
     }
   };
@@ -99,7 +121,7 @@ app.initKeys = () => {
   // This event fires repeatedly, for as long as the key is held down
   // The rate of repeat depends on your system's key repeat rate setting
   document.addEventListener('keydown', ev => {
-
+ 
     if( !(ev.key in app.keys.trackedKeys) ){
       return; // early return for keys we're not supposed to track
     }

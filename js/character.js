@@ -223,17 +223,20 @@ class Character {
     // Start the default animation playing
     this.animation.action = this.animation.allActions[ defaultAnimation ];
     // this.animation.action.play();
-
   } // initialiseAnimations()
 
 
-  changeAnimation( name ){
+  changeAnimation( name, opts = {} ){
 
     this.animation.action.crossFadeTo( this.animation.allActions[name], 1, true );
     this.animation.action = this.animation.allActions[name];  // TODO: is this a problem???
     this.animation.name = name;
     this.animation.action.enabled = true;  // Gets disabled after last crossfade
-    this.animation.action.timeScale = 1;
+    if(opts.timeScale) {
+      this.animation.action.timeScale = opts.timeScale;
+    } else {
+      this.animation.action.timeScale = 1;
+    }
     this.animation.action.reset().play();
 
     // special-case code to control e.g. the looping of certain animations
@@ -299,6 +302,8 @@ class Character {
 
   changeState( state, opts={} ){
 
+    console.log('changeState opts', opts)
+
     console.log('changeState', state );
 
     if( state === this.state.action ){
@@ -313,8 +318,13 @@ class Character {
     switch( state ){
     case 'walk':
       // this.state.velocity = new THREE.Vector3( 0, 0, 0.1 );
-      this.state.speed = app.controls.walkSpeed;
+      if(opts.walkSpeed) {
+        this.state.speed = app.controls.walkSpeed * opts.walkSpeed;
+      } else {
+        this.state.speed = app.controls.walkSpeed;
+      }
       break;
+ 
     case 'idle':
       // this.state.velocity = new THREE.Vector3( 0, 0, 0.1 );
       this.state.speed = 0;
@@ -322,7 +332,7 @@ class Character {
 
     } // switch( state )
 
-    this.changeAnimation( opts.action || state );
+    this.changeAnimation(state, opts );
 
   } // changeState()
 
