@@ -17,7 +17,7 @@ export class InputManager {
 
   constructor(private readonly toggleCamera: () => void) {
     this.keyboard = new KeyboardInput(() => this.toggleCamera());
-    this.mobile = new MobileControls();
+    this.mobile = new MobileControls(document.body, { onToggleCamera: () => this.toggleCamera() });
     this.guiSettings = this.mobile.getSettings();
   }
 

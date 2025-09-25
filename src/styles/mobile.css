@@ -81,6 +81,35 @@
   border-color: rgba(255, 255, 255, 0.65);
 }
 
+.touch-utility {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 16px);
+  right: calc(env(safe-area-inset-right) + 16px);
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.touch-utility span {
+  font-size: 0.7rem;
+}
+
+.touch-utility:active {
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
 @media (orientation: landscape) {
   .touch-actions {
     flex-direction: row;

@@ -7,19 +7,24 @@ import { SensorInput } from '../motion/SensorInput';
 
 const STORAGE_KEY = 'ffc-mobile-controls';
 
+interface MobileControlsOptions {
+  onToggleCamera?: () => void;
+}
+
 interface MobileControlsContext {
   layer: HTMLDivElement;
   joystick: VirtualJoystick;
   look: TouchLook;
   actions: ActionButtons;
   motion: MotionController;
+  cameraButton: HTMLButtonElement | null;
 }
 
 export class MobileControls {
   private context: MobileControlsContext | null = null;
   private settings: MobileControlSettings = defaultMobileSettings();
 
-  constructor(private readonly root: HTMLElement = document.body) {
+  constructor(private readonly root: HTMLElement = document.body, private readonly options: MobileControlsOptions = {}) {
     this.settings = { ...defaultMobileSettings(), ...this.loadSettings() };
   }
 
@@ -49,13 +54,15 @@ export class MobileControls {
 
     const actions = new ActionButtons(layer);
 
+    const cameraButton = this.createCameraToggle(layer);
+
     const motion = new MotionController(new SensorInput());
     motion.setGyro(this.settings.gyroAimEnabled, this.settings.gyroAimSensitivity);
     motion.setTiltOptions(this.settings.tiltSensitivity, this.settings.tiltDeadzone);
     motion.setMode(this.settings.tiltMode);
 
     this.root.appendChild(layer);
-    this.context = { layer, joystick, look, actions, motion };
+    this.context = { layer, joystick, look, actions, motion, cameraButton };
     this.applySettings();
   }
 
@@ -82,6 +89,7 @@ export class MobileControls {
     this.context.look.dispose();
     this.context.actions.dispose();
     this.context.motion.disable();
+    this.context.cameraButton?.remove();
     this.context.layer.remove();
     this.context = null;
   }
@@ -165,5 +173,32 @@ export class MobileControls {
     } catch (error) {
       console.warn('Failed to persist mobile control settings', error);
     }
+  }
+
+  private createCameraToggle(layer: HTMLElement): HTMLButtonElement | null {
+    if (!this.options.onToggleCamera) {
+      return null;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'touch-utility touch-camera-toggle';
+    button.setAttribute('aria-label', 'Toggle Camera View');
+    button.innerHTML = '<span>Cam</span>';
+
+    const handler = (event: PointerEvent) => {
+      event.stopPropagation();
+      event.preventDefault();
+      this.options.onToggleCamera?.();
+    };
+
+    button.addEventListener('pointerdown', handler, { passive: false });
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      event.preventDefault();
+    });
+
+    layer.appendChild(button);
+    return button;
   }
 }
