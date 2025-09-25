@@ -2,6 +2,8 @@
 # Farmyard Fight Club
 ### A Three.js 3D Coronavirus Codealong
 
+[Changelog](CHANGELOG.md)
+
 ___
 
 
