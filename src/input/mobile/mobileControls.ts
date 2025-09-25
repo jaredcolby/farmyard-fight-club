@@ -9,6 +9,12 @@ const STORAGE_KEY = 'ffc-mobile-controls';
 
 interface MobileControlsOptions {
   onToggleCamera?: () => void;
+  onToggleMenu?: () => void;
+}
+
+interface UtilityButton {
+  element: HTMLButtonElement;
+  handler: (event: PointerEvent) => void;
 }
 
 interface MobileControlsContext {
@@ -17,7 +23,10 @@ interface MobileControlsContext {
   look: TouchLook;
   actions: ActionButtons;
   motion: MotionController;
-  cameraButton: HTMLButtonElement | null;
+  utilities: {
+    container: HTMLDivElement;
+    buttons: UtilityButton[];
+  } | null;
 }
 
 export class MobileControls {
@@ -54,7 +63,20 @@ export class MobileControls {
 
     const actions = new ActionButtons(layer);
 
-    const cameraButton = this.createCameraToggle(layer);
+    const utilities = this.createUtilities();
+    const utilityButtons: UtilityButton[] = [];
+    const cameraButton = this.createUtilityButton(utilities, 'Cam', 'camera-toggle', this.options.onToggleCamera);
+    if (cameraButton) {
+      utilityButtons.push(cameraButton);
+    }
+    const menuButton = this.createUtilityButton(utilities, 'Menu', 'menu-toggle', this.options.onToggleMenu);
+    if (menuButton) {
+      utilityButtons.push(menuButton);
+    }
+
+    if (utilityButtons.length === 0) {
+      utilities.remove();
+    }
 
     const motion = new MotionController(new SensorInput());
     motion.setGyro(this.settings.gyroAimEnabled, this.settings.gyroAimSensitivity);
@@ -62,7 +84,14 @@ export class MobileControls {
     motion.setMode(this.settings.tiltMode);
 
     this.root.appendChild(layer);
-    this.context = { layer, joystick, look, actions, motion, cameraButton };
+    this.context = {
+      layer,
+      joystick,
+      look,
+      actions,
+      motion,
+      utilities: utilityButtons.length ? { container: utilities, buttons: utilityButtons } : null
+    };
     this.applySettings();
   }
 
@@ -89,9 +118,26 @@ export class MobileControls {
     this.context.look.dispose();
     this.context.actions.dispose();
     this.context.motion.disable();
-    this.context.cameraButton?.remove();
+    if (this.context.utilities) {
+      this.context.utilities.buttons.forEach(({ element, handler }) => {
+        element.removeEventListener('pointerdown', handler);
+      });
+      this.context.utilities.container.remove();
+    }
     this.context.layer.remove();
     this.context = null;
+  }
+
+  setInteractive(interactive: boolean): void {
+    if (!this.context) {
+      return;
+    }
+
+    if (interactive) {
+      this.context.layer.classList.remove('touch-layer--disabled');
+    } else {
+      this.context.layer.classList.add('touch-layer--disabled');
+    }
   }
 
   read(): InputState {
@@ -175,21 +221,36 @@ export class MobileControls {
     }
   }
 
-  private createCameraToggle(layer: HTMLElement): HTMLButtonElement | null {
-    if (!this.options.onToggleCamera) {
+  private createUtilities(): HTMLDivElement {
+    const utilities = document.createElement('div');
+    utilities.className = 'touch-utilities';
+    document.body.appendChild(utilities);
+    return utilities;
+  }
+
+  private createUtilityButton(
+    container: HTMLElement,
+    label: string,
+    modifier: string,
+    action?: () => void
+  ): UtilityButton | null {
+    if (!action) {
       return null;
     }
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'touch-utility touch-camera-toggle';
-    button.setAttribute('aria-label', 'Toggle Camera View');
-    button.innerHTML = '<span>Cam</span>';
+    button.className = `touch-utility touch-${modifier}`;
+    button.setAttribute('aria-label', label);
+    button.innerHTML = `<span>${label}</span>`;
 
     const handler = (event: PointerEvent) => {
+      if (!event.isPrimary) {
+        return;
+      }
       event.stopPropagation();
       event.preventDefault();
-      this.options.onToggleCamera?.();
+      action();
     };
 
     button.addEventListener('pointerdown', handler, { passive: false });
@@ -198,7 +259,7 @@ export class MobileControls {
       event.preventDefault();
     });
 
-    layer.appendChild(button);
-    return button;
+    container.appendChild(button);
+    return { element: button, handler };
   }
 }

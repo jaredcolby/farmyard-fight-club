@@ -16,6 +16,10 @@
   justify-content: stretch;
 }
 
+.touch-layer--disabled {
+  pointer-events: none;
+}
+
 .touch-joystick-base {
   --touch-x: 0px;
   --touch-y: 0px;
@@ -81,10 +85,18 @@
   border-color: rgba(255, 255, 255, 0.65);
 }
 
-.touch-utility {
-  position: absolute;
+.touch-utilities {
+  position: fixed;
   top: calc(env(safe-area-inset-top) + 16px);
   right: calc(env(safe-area-inset-right) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: auto;
+  z-index: 30;
+}
+
+.touch-utility {
   width: 60px;
   height: 60px;
   border-radius: 999px;
@@ -112,6 +124,10 @@
 
 @media (orientation: landscape) {
   .touch-actions {
+    flex-direction: row;
+  }
+
+  .touch-utilities {
     flex-direction: row;
   }
 }

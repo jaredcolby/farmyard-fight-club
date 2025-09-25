@@ -15,9 +15,12 @@ export class InputManager {
   private readonly guiSettings: MobileControlSettings;
   private readonly controllers: Partial<Record<keyof MobileControlSettings | 'gyroAimEnabled' | 'tiltMode', GUIController>> = {};
 
-  constructor(private readonly toggleCamera: () => void) {
-    this.keyboard = new KeyboardInput(() => this.toggleCamera());
-    this.mobile = new MobileControls(document.body, { onToggleCamera: () => this.toggleCamera() });
+  constructor(private readonly toggleCamera: () => void, private readonly toggleGui: () => void) {
+    this.keyboard = new KeyboardInput(() => this.toggleCamera(), () => this.toggleGui());
+    this.mobile = new MobileControls(document.body, {
+      onToggleCamera: () => this.toggleCamera(),
+      onToggleMenu: () => this.toggleGui()
+    });
     this.guiSettings = this.mobile.getSettings();
   }
 
@@ -40,6 +43,12 @@ export class InputManager {
       mergeInputStates(state, mobileState);
     }
     return state;
+  }
+
+  setMobileInteractivity(interactive: boolean): void {
+    if (this.mobile.canEnable()) {
+      this.mobile.setInteractive(interactive);
+    }
   }
 
   attachToGui(gui: GUI): void {

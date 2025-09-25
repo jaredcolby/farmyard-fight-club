@@ -54,6 +54,7 @@ export class Game {
   private multiplayer?: MultiplayerClient;
   private readonly remotePlayers = new Map<string, RemotePlayer>();
   private playerId: string | null = null;
+  private guiVisible = false;
   private walkAudioPlaying = false;
   private jumpHeld = false;
   private readonly tempForward = new THREE.Vector3();
@@ -84,8 +85,9 @@ export class Game {
     this.audio = new AudioManager(this.camera);
     await this.audio.load();
 
-    this.inputs = new InputManager(this.toggleCamera);
+    this.inputs = new InputManager(this.toggleCamera, this.toggleGuiVisibility);
     this.inputs.register();
+    this.setGuiVisibility(false);
     this.inputs.attachToGui(this.gui);
 
     window.addEventListener('resize', this.handleResize);
@@ -478,6 +480,35 @@ export class Game {
       playerObject.remove(this.camera);
       this.cameraControls.reset();
     }
+  };
+
+  private setGuiVisibility(visible: boolean): void {
+    this.guiVisible = visible;
+    const guiWithVisibility = this.gui as GUI & { hide?: () => void; show?: () => void };
+    if (visible) {
+      if (guiWithVisibility.show) {
+        guiWithVisibility.show();
+      } else {
+        this.gui.domElement.style.display = '';
+      }
+      this.gui.domElement.style.zIndex = '40';
+      this.gui.domElement.style.pointerEvents = 'auto';
+      this.inputs.setMobileInteractivity(false);
+    } else if (guiWithVisibility.hide) {
+      guiWithVisibility.hide();
+      this.gui.domElement.style.zIndex = '';
+      this.gui.domElement.style.pointerEvents = '';
+      this.inputs.setMobileInteractivity(true);
+    } else {
+      this.gui.domElement.style.display = 'none';
+      this.gui.domElement.style.zIndex = '';
+      this.gui.domElement.style.pointerEvents = '';
+      this.inputs.setMobileInteractivity(true);
+    }
+  }
+
+  private toggleGuiVisibility = (): void => {
+    this.setGuiVisibility(!this.guiVisible);
   };
 
   private handleResize(): void {

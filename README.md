@@ -86,6 +86,7 @@ Can you push each other off the edge of a platform? Chase each other around?
   - `src/styles/mobile.css`
 - **Mounting:** On boot, if `navigator.maxTouchPoints > 0`, create a `#touch-layer` overlay and register pointer handlers. Keep keyboard/mouse for desktop; merge inputs in a single `InputState`.
 - **Camera toggle:** Expose a top-right `Cam` utility button on mobile to mirror the desktop `C` key for cycling POV.
+- **GUI toggle:** Hide dat.GUI by default; surface a `Menu` utility button on mobile and map `G` (desktop) to show/hide when needed.
 - **CSS:** Add glassy circles for joystick base/knob and large tappable buttons; respect iOS safe-area insets.
 - **Viewport meta:** In `index.html` add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />`.
 - **Motion permissions (iOS):** Gate `DeviceMotionEvent.requestPermission()` behind a user tap (“Enable Motion Controls”). Provide “Calibrate” to set the current pose as neutral.
