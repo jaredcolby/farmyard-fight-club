@@ -149,6 +149,7 @@ export class Game {
   }
 
   private setupGui(): void {
+    this.gui.domElement.classList.add('gui-overlay');
     this.gui.addColor(this.controls, 'spotlightColour').onChange(value => {
       this.spotlight.color.setStyle(value);
     });
@@ -491,18 +492,15 @@ export class Game {
       } else {
         this.gui.domElement.style.display = '';
       }
-      this.gui.domElement.style.zIndex = '40';
-      this.gui.domElement.style.pointerEvents = 'auto';
+      this.gui.domElement.classList.add('gui-visible');
       this.inputs.setMobileInteractivity(false);
     } else if (guiWithVisibility.hide) {
       guiWithVisibility.hide();
-      this.gui.domElement.style.zIndex = '';
-      this.gui.domElement.style.pointerEvents = '';
+      this.gui.domElement.classList.remove('gui-visible');
       this.inputs.setMobileInteractivity(true);
     } else {
       this.gui.domElement.style.display = 'none';
-      this.gui.domElement.style.zIndex = '';
-      this.gui.domElement.style.pointerEvents = '';
+      this.gui.domElement.classList.remove('gui-visible');
       this.inputs.setMobileInteractivity(true);
     }
   }

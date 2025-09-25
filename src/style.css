@@ -2,3 +2,45 @@ body{
   margin: 0;
   overflow: hidden;
 }
+
+.dg.gui-overlay {
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 16px);
+  left: calc(env(safe-area-inset-left, 0px) + 16px);
+  width: min(320px, calc(100vw - 48px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  background: rgba(28, 28, 28, 0.92);
+  pointer-events: none;
+  z-index: 40;
+  backdrop-filter: blur(6px);
+}
+
+.dg.gui-overlay .close-button {
+  position: sticky;
+  top: 0;
+  background: rgba(12, 12, 12, 0.85);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dg.gui-overlay .main {
+  max-height: calc(100% - 28px);
+  overflow-y: auto;
+}
+
+.dg.gui-overlay.gui-visible {
+  pointer-events: auto;
+}
+
+.dg.gui-overlay .cr.number input[type='text'],
+.dg.gui-overlay .cr.function,
+.dg.gui-overlay .cr.boolean {
+  touch-action: manipulation;
+}
+
+@media (max-width: 600px) {
+  .dg.gui-overlay {
+    width: min(360px, calc(100vw - 32px));
+  }
+}
