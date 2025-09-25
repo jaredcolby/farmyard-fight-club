@@ -5,33 +5,22 @@
 ___
 
 
-#### INSTRUCTIONS
-
+#### DEVELOPMENT SETUP
 
 ```bash
-# Clone this repo to somewhere familiar:
-cd ~
-git clone https://github.com/jaredcolby/farmyard-fight-club.git
-
-# Go there:
-cd farmyard-fight-club
-
-# Open editor
-atom .
-
-# Recommended: install 'reload' package
+# install dependencies
 npm install
 
-# Start reload server
-npm run start
+# run the multiplayer websocket hub (terminal 1)
+npm run server
 
-# (NOTHING TO SEE YET)
-# (AWAIT FURTHER INSTRUCTIONS)
-
-# Why not download some Zoom virtual background videos while you wait:
-# https://pixabay.com/videos/search/abstract/
+# start the Vite dev server (terminal 2)
+npm run dev
 ```
 
+- Game runs at http://localhost:5173 by default.
+- Multiplayer hub listens on ws://localhost:3001; override with `MULTIPLAYER_PORT` when running the server or `VITE_MULTIPLAYER_URL` for the client.
+- Build for production with `npm run build` and preview with `npm run preview`.
 
 ![screenshot](screenshot.png)
 
@@ -83,20 +72,21 @@ Can you push each other off the edge of a platform? Chase each other around?
 - clean up changeState / changeAnimation code, to make it easier to
   modify the animation params - i.e. walking backwards
 
+## Multiplayer Notes
+
+- To find your LAN IP on macOS Wi-Fi: `ipconfig getifaddr en0`.
+- macOS advertises a `.local` hostname; check System Settings → General → Sharing. Friends on the same Wi-Fi can use `http://<host>.local:5173` and `ws://<host>.local:3001`.
+- For quicker commands you can export `LAN_HOST=$(ipconfig getifaddr en0)` and reference `$LAN_HOST` in your run scripts.
+- For off-network play use a tunnel (ngrok, Cloudflare Tunnel, LocalTunnel, etc.) and set `VITE_MULTIPLAYER_URL` to the resulting wss URL.
+- Ensure your firewall allows inbound 5173/3001 during sessions and close the servers when you wrap up.
+
 ## Review
 
-- Load up scripts
-- main.js:
-   - app.init():
-     - create 3D scene
-     - load models and create characters: app.initCharacters()
-           - in modelmanager onLoad():
-                - add characters
-                - app.animate()  ---- MAIN GAME RENDER/UPDATE
-                    - for each character, call their update() method
-                         - updating the animation
-     - load scenery models: app.initScenery()
-     - load keyboard handlers: app.initKeys()
+- `src/main.ts` bootstraps the `Game` class once the page loads.
+- `src/game/Game.ts` manages scene setup, animation loop, multiplayer integration, and overall orchestration.
+- `src/game/Character.ts` contains `Character`, `Player`, and `RemotePlayer` logic plus animation/collision plumbing.
+- `src/game/Keyboard.ts`, `src/game/audio.ts`, and `src/game/Scenery.ts` wrap inputs, sounds, and environment loading.
+- `src/game/MultiplayerClient.ts` talks to the WebSocket hub; run `npm run server` to start `server/index.ts`.
 
 
 #### CREDITS
