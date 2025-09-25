@@ -1,4 +1,5 @@
 import './style.css';
+import './styles/mobile.css';
 import { Game } from './game/Game';
 
 const game = new Game();

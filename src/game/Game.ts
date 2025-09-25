@@ -6,10 +6,13 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import type { ControlMode, ModelDefinition, PlayerSnapshot } from './types';
 import { Character, Player, RemotePlayer } from './Character';
-import { KeyboardManager } from './Keyboard';
+import { InputManager } from '../input/InputManager';
+import type { InputState } from '../input/types';
 import { SceneryManager } from './Scenery';
 import { AudioManager } from './audio';
 import { MultiplayerClient } from './MultiplayerClient';
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 export interface GameControls {
   spotlightColour: string;
@@ -43,7 +46,7 @@ export class Game {
 
   private landTexture!: THREE.Texture;
   private player!: Player;
-  private keyboard!: KeyboardManager;
+  private inputs!: InputManager;
   private scenery!: SceneryManager;
   private audio!: AudioManager;
 
@@ -51,6 +54,11 @@ export class Game {
   private multiplayer?: MultiplayerClient;
   private readonly remotePlayers = new Map<string, RemotePlayer>();
   private playerId: string | null = null;
+  private walkAudioPlaying = false;
+  private jumpHeld = false;
+  private readonly tempForward = new THREE.Vector3();
+  private readonly tempRight = new THREE.Vector3();
+  private readonly up = new THREE.Vector3(0, 1, 0);
 
   constructor(private readonly outputSelector = '#output', private readonly statsSelector = '#stats') {
     this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 1, 2000);
@@ -76,8 +84,9 @@ export class Game {
     this.audio = new AudioManager(this.camera);
     await this.audio.load();
 
-    this.keyboard = new KeyboardManager(this, () => this.player);
-    this.keyboard.register();
+    this.inputs = new InputManager(this.toggleCamera);
+    this.inputs.register();
+    this.inputs.attachToGui(this.gui);
 
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('dblclick', this.handleDblClick);
@@ -91,7 +100,7 @@ export class Game {
   dispose(): void {
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('dblclick', this.handleDblClick);
-    this.keyboard?.dispose();
+    this.inputs?.dispose();
     this.multiplayer?.dispose();
     this.clearRemotePlayers();
     this.gui.destroy();
@@ -365,7 +374,8 @@ export class Game {
     const deltaTime = seconds - this.lastAnimateTime;
     this.lastAnimateTime = seconds;
 
-    this.keyboard.handleHeldKeys();
+    const input = this.inputs.read();
+    this.applyInput(input);
 
     if (this.controls.cameraPOV === 'player') {
       const charPos = this.player.object.position.clone();
@@ -385,6 +395,89 @@ export class Game {
     this.stats.update();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this.animate);
+  };
+
+  private applyInput(input: InputState): void {
+    if (!this.player) {
+      return;
+    }
+
+    if (input.lookDelta.x !== 0) {
+      this.player.object.rotateY(-input.lookDelta.x);
+    }
+
+    if (Math.abs(input.move.x) > 0.05) {
+      this.applyStrafe(input.move.x);
+    }
+
+    if (input.actions.jump && !this.jumpHeld) {
+      this.jumpHeld = true;
+      this.audio.setPlaybackRate('walk', 0.5);
+      this.audio.play('walk');
+      this.player.changeState('jump', { force: true });
+    } else if (!input.actions.jump && this.jumpHeld) {
+      this.jumpHeld = false;
+      this.audio.stop('walk');
+      this.walkAudioPlaying = false;
+    }
+
+    if (this.jumpHeld) {
+      return;
+    }
+
+    const forward = clamp(input.move.y, -1, 1);
+    const moving = Math.abs(forward) > 0.05;
+
+    if (moving) {
+      const magnitude = Math.abs(forward);
+      const direction = Math.sign(forward) || 1;
+      const timeScale = direction * Math.max(0.5, magnitude);
+      this.player.changeState('walk', { walkSpeed: forward, timeScale, force: true });
+      this.audio.setPlaybackRate('walk', Math.abs(timeScale));
+      if (!this.walkAudioPlaying) {
+        this.audio.play('walk');
+        this.walkAudioPlaying = true;
+      }
+    } else {
+      if (this.player.getCurrentState() !== 'idle') {
+        this.player.changeState('idle');
+      }
+      if (this.walkAudioPlaying) {
+        this.audio.stop('walk');
+        this.walkAudioPlaying = false;
+      }
+    }
+  }
+
+  private applyStrafe(amount: number): void {
+    const clamped = clamp(amount, -1, 1);
+    if (Math.abs(clamped) < 0.05) {
+      return;
+    }
+
+    this.player.object.getWorldDirection(this.tempForward);
+    this.tempRight.copy(this.tempForward).cross(this.up).normalize();
+    this.player.object.position.addScaledVector(this.tempRight, clamped * this.walkSpeed);
+  }
+
+  private toggleCamera = (): void => {
+    if (!this.player) {
+      return;
+    }
+
+    const playerObject = this.player.object;
+    if (this.controls.cameraPOV === 'world') {
+      this.controls.cameraPOV = 'player';
+      this.cameraControls.saveState();
+      playerObject.add(this.camera);
+      this.camera.position.set(0, 10, -20);
+      const lookAtTarget = playerObject.position.clone().add(new THREE.Vector3(0, 10, 0));
+      this.camera.lookAt(lookAtTarget);
+    } else {
+      this.controls.cameraPOV = 'world';
+      playerObject.remove(this.camera);
+      this.cameraControls.reset();
+    }
   };
 
   private handleResize(): void {

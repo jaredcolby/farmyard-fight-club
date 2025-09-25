@@ -1,0 +1,88 @@
+:root {
+  --touch-safe-bottom: calc(env(safe-area-inset-bottom) + 24px);
+  --touch-safe-right: calc(env(safe-area-inset-right) + 24px);
+  --touch-safe-left: calc(env(safe-area-inset-left) + 24px);
+}
+
+.touch-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.touch-joystick-base {
+  --touch-x: 0px;
+  --touch-y: 0px;
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  left: calc(var(--touch-x) - 60px);
+  top: calc(var(--touch-y) - 60px);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(12px);
+  display: none;
+  mix-blend-mode: screen;
+}
+
+.touch-joystick-base.active {
+  display: block;
+}
+
+.touch-joystick-knob {
+  --touch-x: 0px;
+  --touch-y: 0px;
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  left: calc(var(--touch-x) - 36px);
+  top: calc(var(--touch-y) - 36px);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.touch-actions {
+  position: absolute;
+  bottom: var(--touch-safe-bottom);
+  right: var(--touch-safe-right);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  pointer-events: auto;
+}
+
+.touch-action {
+  min-width: 84px;
+  min-height: 84px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.touch-action.active,
+.touch-action:active {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.65);
+}
+
+@media (orientation: landscape) {
+  .touch-actions {
+    flex-direction: row;
+  }
+}

@@ -61,6 +61,85 @@ Can you push each other off the edge of a platform? Chase each other around?
 - Huge explosions
 - Networked multiplayer mode - Firebase?
 
+## Feature Request: Mobile Controls (Touch + Motion)
+
+**Why:** On phones the game is difficult to engage with using only desktop-style inputs. We need thumb-native controls and (optionally) motion sensors so it feels natural on mobile.
+
+### Scope
+- **Primary (Touch):**
+  - **Left-thumb virtual joystick** for directional movement (relative stick: appears where the thumb lands).
+  - **Right-thumb swipe** for camera/look.
+  - **Action buttons** (Primary, Secondary, Jump) bottom-right with large hit areas.
+- **Secondary (Motion – optional & toggleable):**
+  - **Gyro aim**: use small wrist motions for “micro-aim” on top of right-thumb swipe.
+  - **Tilt-to-move (experimental)**: map device pitch/roll to a small movement bias or full movement in a “casual” mode.
+
+### Implementation Notes (idiomatic to this stack)
+- **Language/stack:** TypeScript + Vite + Three.js. No new deps required.
+- **File layout (suggested):**
+  - `src/input/mobile/VirtualJoystick.ts`
+  - `src/input/mobile/TouchLook.ts`
+  - `src/input/mobile/ActionButtons.ts`
+  - `src/input/mobile/mobileControls.ts` (mount + `read()` aggregator)
+  - `src/input/motion/SensorInput.ts` (permission, smoothing, calibration)
+  - `src/input/motion/MotionController.ts` (modes: 'off' | 'tiltMove' | 'gyroAim' | 'tiltAssist')
+  - `src/styles/mobile.css`
+- **Mounting:** On boot, if `navigator.maxTouchPoints > 0`, create a `#touch-layer` overlay and register pointer handlers. Keep keyboard/mouse for desktop; merge inputs in a single `InputState`.
+- **CSS:** Add glassy circles for joystick base/knob and large tappable buttons; respect iOS safe-area insets.
+- **Viewport meta:** In `index.html` add `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />`.
+- **Motion permissions (iOS):** Gate `DeviceMotionEvent.requestPermission()` behind a user tap (“Enable Motion Controls”). Provide “Calibrate” to set the current pose as neutral.
+- **Tuning defaults:**
+  - Joystick: radius ~60 px, deadzone 10 px, smoothing EMA α≈0.25.
+  - Look swipe sensitivity: start ~0.15 (px → degrees/radians as your camera expects).
+  - Motion: deadzone 4–5°, clamp at 15°, gyro aim gain ~0.02 (deg/s → pixels/frame).
+- **Networking:** Send **inputs only** (stick vector, look delta, action bits). No world positions.
+- **Accessibility:** Provide toggles in a simple in-game Settings panel:
+  - Gyro Aim (on/off, sensitivity)
+  - Tilt to Move (off/assist/full, sensitivity, deadzone, “Calibrate”)
+  - Invert Y, Look sensitivity
+
+### Minimal Types (reference)
+```ts
+// src/input/types.ts
+export type Vec2 = { x: number; y: number };
+export interface InputState {
+  move: Vec2;           // -1..1 movement axes
+  lookDelta: Vec2;      // screen-space delta per frame
+  actions: { primary: boolean; secondary: boolean; jump: boolean };
+}
+```
+
+### Dev & Testing
+- Local run: Keep existing scripts (`npm run server` on :3001, `npm run dev` on :5173).
+- Env: Continue using `VITE_MULTIPLAYER_URL` and `MULTIPLAYER_PORT` as documented.
+- Test on iOS Safari + Android Chrome in landscape. Verify multitouch (left stick + right swipe + button press simultaneously).
+
+### How to Enable Motion Controls
+1. Launch the game on a touch-capable device (controls mount automatically when `navigator.maxTouchPoints > 0`).
+2. Open the in-game GUI (top-right dat.GUI panel) and expand **Mobile Controls**.
+3. Tap **Enable Motion Controls** to grant motion/gyro permission, then toggle **Gyro Aim** or select a **Tilt Mode**.
+4. Adjust sensitivities, invert options, and use **Calibrate Neutral Pose** to set your comfortable resting orientation. Settings persist via `localStorage`.
+
+### Tasks (checklist)
+- [x] Add mobile input modules and styles per layout above.
+- [x] Auto-mount touch layer on devices with `maxTouchPoints > 0`.
+- [x] Implement relative joystick with deadzone and smoothing.
+- [x] Implement right-thumb swipe look with sensitivity setting.
+- [x] Add action buttons (Primary, Secondary, Jump) with large hit areas + haptics (`navigator.vibrate(10)` if available).
+- [x] Optional: implement MotionController (gyro aim, tilt assist/move) behind a permissioned toggle + calibrate.
+- [x] Settings panel toggles + sensitivity sliders; persist to `localStorage`.
+- [x] Update README with short “How to Enable Motion Controls” snippet.
+
+### Acceptance Criteria
+- On a touch device, player can move with the left thumb, look/aim with the right thumb, and trigger actions with buttons, all simultaneously.
+- Controls feel stable: deadzones work, no unexpected page scroll/zoom, multitouch is reliable.
+- (If enabled) Gyro aim subtly improves fine control without drift; tilt modes can be toggled off cleanly.
+- Desktop inputs remain unchanged.
+
+### Future Nice-to-Haves
+- Fixed vs relative joystick toggle
+- Simple aim assist (mobile-only)
+- Visual HUD widget that visualizes current tilt for calibration
 
 
 ## Session 2
@@ -85,7 +164,7 @@ Can you push each other off the edge of a platform? Chase each other around?
 - `src/main.ts` bootstraps the `Game` class once the page loads.
 - `src/game/Game.ts` manages scene setup, animation loop, multiplayer integration, and overall orchestration.
 - `src/game/Character.ts` contains `Character`, `Player`, and `RemotePlayer` logic plus animation/collision plumbing.
-- `src/game/Keyboard.ts`, `src/game/audio.ts`, and `src/game/Scenery.ts` wrap inputs, sounds, and environment loading.
+- `src/input/InputManager.ts`, `src/game/audio.ts`, and `src/game/Scenery.ts` wrap inputs, sounds, and environment loading (touch + motion layers live under `src/input/mobile` / `src/input/motion`).
 - `src/game/MultiplayerClient.ts` talks to the WebSocket hub; run `npm run server` to start `server/index.ts`.
 
 
