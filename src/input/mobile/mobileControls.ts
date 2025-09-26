@@ -1,6 +1,5 @@
 import { createEmptyInputState, defaultMobileSettings, InputState, MobileControlSettings } from '../types';
 import { ActionButtons } from './ActionButtons';
-import { TouchLook } from './TouchLook';
 import { VirtualJoystick } from './VirtualJoystick';
 import { MotionController } from '../motion/MotionController';
 import { SensorInput } from '../motion/SensorInput';
@@ -20,13 +19,13 @@ interface UtilityButton {
 interface MobileControlsContext {
   layer: HTMLDivElement;
   joystick: VirtualJoystick;
-  look: TouchLook;
   actions: ActionButtons;
   motion: MotionController;
   utilities: {
     container: HTMLDivElement;
     buttons: UtilityButton[];
   } | null;
+  cameraButton: UtilityButton | null;
 }
 
 export class MobileControls {
@@ -56,16 +55,11 @@ export class MobileControls {
       smoothingAlpha: 0.25
     });
 
-    const look = new TouchLook(layer, {
-      sensitivity: this.settings.lookSensitivity,
-      invertY: this.settings.invertY
-    });
-
     const actions = new ActionButtons(layer);
 
     const utilities = this.createUtilities();
     const utilityButtons: UtilityButton[] = [];
-    const cameraButton = this.createUtilityButton(utilities, 'Cam', 'camera-toggle', this.options.onToggleCamera);
+    const cameraButton = this.createUtilityButton(utilities, 'Orbit', 'camera-toggle', this.options.onToggleCamera);
     if (cameraButton) {
       utilityButtons.push(cameraButton);
     }
@@ -87,10 +81,10 @@ export class MobileControls {
     this.context = {
       layer,
       joystick,
-      look,
       actions,
       motion,
-      utilities: utilityButtons.length ? { container: utilities, buttons: utilityButtons } : null
+      utilities: utilityButtons.length ? { container: utilities, buttons: utilityButtons } : null,
+      cameraButton: cameraButton ?? null
     };
     this.applySettings();
   }
@@ -115,7 +109,6 @@ export class MobileControls {
       return;
     }
     this.context.joystick.dispose();
-    this.context.look.dispose();
     this.context.actions.dispose();
     this.context.motion.disable();
     if (this.context.utilities) {
@@ -151,10 +144,6 @@ export class MobileControls {
     state.move.x += move.x;
     state.move.y += move.y;
 
-    const lookDelta = this.context.look.consumeDelta();
-    state.lookDelta.x += lookDelta.x;
-    state.lookDelta.y += lookDelta.y;
-
     const actions = this.context.actions.getState();
     state.actions.primary = state.actions.primary || actions.primary;
     state.actions.secondary = state.actions.secondary || actions.secondary;
@@ -165,6 +154,22 @@ export class MobileControls {
 
   getSettings(): MobileControlSettings {
     return { ...this.settings };
+  }
+
+  getLayer(): HTMLDivElement | null {
+    return this.context?.layer ?? null;
+  }
+
+  setCameraButtonLabel(label: string): void {
+    if (!this.context?.cameraButton) {
+      return;
+    }
+    const { element } = this.context.cameraButton;
+    element.setAttribute('aria-label', label);
+    const span = element.querySelector('span');
+    if (span) {
+      span.textContent = label;
+    }
   }
 
   updateSettings(update: Partial<MobileControlSettings>): MobileControlSettings {
@@ -179,8 +184,6 @@ export class MobileControls {
       return;
     }
 
-    this.context.look.setSensitivity(this.settings.lookSensitivity);
-    this.context.look.setInvertY(this.settings.invertY);
     this.context.motion.setGyro(this.settings.gyroAimEnabled, this.settings.gyroAimSensitivity);
     this.context.motion.setTiltOptions(this.settings.tiltSensitivity, this.settings.tiltDeadzone);
     this.context.motion.setMode(this.settings.tiltMode);

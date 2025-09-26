@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GUI } from 'dat.gui';
 import Stats from 'stats.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import type { ControlMode, ModelDefinition, PlayerSnapshot } from './types';
@@ -11,8 +10,10 @@ import type { InputState } from '../input/types';
 import { SceneryManager } from './Scenery';
 import { AudioManager } from './audio';
 import { MultiplayerClient } from './MultiplayerClient';
+import { CameraRig, createCameraRig } from '../camera';
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const CAMERA_DISTANCE_STORAGE_KEY = 'FYC_CAM_DIST';
 
 export interface GameControls {
   spotlightColour: string;
@@ -28,14 +29,14 @@ export class Game {
     debug: false,
     playerState: '',
     walkSpeed: 0.3,
-    cameraPOV: 'world'
+    cameraPOV: 'orbit'
   };
 
   private readonly gui = new GUI();
   private readonly scene = new THREE.Scene();
   private readonly renderer = new THREE.WebGLRenderer();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly cameraControls: OrbitControls;
+  private readonly cameraRig: CameraRig;
   private readonly spotlight = new THREE.SpotLight(0xffffff);
   private readonly ambient = new THREE.AmbientLight(0xeeeeee);
   private readonly stats = new Stats();
@@ -60,13 +61,20 @@ export class Game {
   private readonly tempForward = new THREE.Vector3();
   private readonly tempRight = new THREE.Vector3();
   private readonly up = new THREE.Vector3(0, 1, 0);
+  private readonly cameraTarget = new THREE.Vector3();
+  private readonly cameraOffsetOrbit = new THREE.Vector3(0, 2.5, 0);
+  private readonly cameraOffsetChase = new THREE.Vector3(0, 3.4, 0);
+  private readonly chaseLookAhead = 2.6;
+  private readonly forwardVector = new THREE.Vector3();
+  private savedWorldRigState: { distance: number; pitch: number; yaw: number } | null = null;
+  private lastSavedCameraDistance = 0;
 
   constructor(private readonly outputSelector = '#output', private readonly statsSelector = '#stats') {
     this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 1, 2000);
-    this.cameraControls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.cameraRig = createCameraRig(this.scene, this.camera);
+    this.cameraRig.setYaw(Math.PI * 0.25);
 
     this.handleResize = this.handleResize.bind(this);
-    this.handleDblClick = this.handleDblClick.bind(this);
   }
 
   async start(): Promise<void> {
@@ -86,12 +94,13 @@ export class Game {
     await this.audio.load();
 
     this.inputs = new InputManager(this.toggleCamera, this.toggleGuiVisibility);
+    this.inputs.bindCameraRig(this.cameraRig);
     this.inputs.register();
+    this.updateCameraViewLabel();
     this.setGuiVisibility(false);
     this.inputs.attachToGui(this.gui);
 
     window.addEventListener('resize', this.handleResize);
-    window.addEventListener('dblclick', this.handleDblClick);
 
     this.multiplayer = new MultiplayerClient(this);
     this.multiplayer.connect();
@@ -101,7 +110,6 @@ export class Game {
 
   dispose(): void {
     window.removeEventListener('resize', this.handleResize);
-    window.removeEventListener('dblclick', this.handleDblClick);
     this.inputs?.dispose();
     this.multiplayer?.dispose();
     this.clearRemotePlayers();
@@ -132,10 +140,6 @@ export class Game {
     return this.camera;
   }
 
-  getCameraControls(): OrbitControls {
-    return this.cameraControls;
-  }
-
   getRenderer(): THREE.WebGLRenderer {
     return this.renderer;
   }
@@ -162,11 +166,19 @@ export class Game {
 
     this.gui.add(this.controls, 'walkSpeed', 0, 1);
     this.gui.add(this.controls, 'playerState').listen();
+    this.gui
+      .add(this.controls, 'cameraPOV', { Orbit: 'orbit', Chase: 'chase' })
+      .name('Camera View')
+      .onChange((value: ControlMode) => {
+        this.setCameraMode(value);
+      });
   }
 
   private setupRenderer(): void {
-    this.camera.position.set(11, 6, 18);
-    this.camera.lookAt(this.scene.position);
+    this.cameraRig.setDistance(7);
+    this.cameraRig.setPitch(THREE.MathUtils.degToRad(35));
+    this.loadCameraDistance();
+    this.lastSavedCameraDistance = this.cameraRig.getDistance();
 
     this.renderer.setSize(this.width, this.height);
 
@@ -256,6 +268,7 @@ export class Game {
     }
 
     this.player = new Player(this, 'player', playerModel, { position: new THREE.Vector3(0, 0, 0) });
+    this.updateCameraRigTarget();
 
     const modelNames = Array.from(this.models.keys());
     for (let i = 0; i < 20; i += 1) {
@@ -377,14 +390,12 @@ export class Game {
     const deltaTime = seconds - this.lastAnimateTime;
     this.lastAnimateTime = seconds;
 
+    this.inputs.update(deltaTime);
     const input = this.inputs.read();
+    this.updateCameraRigTarget();
     this.applyInput(input);
-
-    if (this.controls.cameraPOV === 'player') {
-      const charPos = this.player.object.position.clone();
-      charPos.add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(charPos);
-    }
+    this.cameraRig.enforceGround(0, 0.2);
+    this.persistCameraDistance();
 
     this.player.update(deltaTime);
     Character.each(character => {
@@ -403,6 +414,10 @@ export class Game {
   private applyInput(input: InputState): void {
     if (!this.player) {
       return;
+    }
+
+    if (input.lookDelta.x !== 0 || input.lookDelta.y !== 0) {
+      this.cameraRig.rotate(-input.lookDelta.x, -input.lookDelta.y);
     }
 
     if (input.lookDelta.x !== 0) {
@@ -452,6 +467,63 @@ export class Game {
     }
   }
 
+  private updateCameraRigTarget(): void {
+    if (!this.player) {
+      return;
+    }
+
+    const offset = this.controls.cameraPOV === 'chase' ? this.cameraOffsetChase : this.cameraOffsetOrbit;
+    this.cameraTarget.copy(this.player.object.position).add(offset);
+    if (this.controls.cameraPOV === 'chase') {
+      this.forwardVector.set(0, 0, -1).applyQuaternion(this.player.object.quaternion).normalize();
+      this.cameraTarget.addScaledVector(this.forwardVector, this.chaseLookAhead);
+      const yaw = Math.atan2(-this.forwardVector.x, -this.forwardVector.z);
+      this.cameraRig.setYaw(yaw);
+    }
+    this.cameraRig.setTarget(this.cameraTarget);
+  }
+
+  private loadCameraDistance(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(CAMERA_DISTANCE_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = Number.parseFloat(raw);
+      if (Number.isFinite(parsed)) {
+        this.cameraRig.setDistance(parsed);
+      }
+    } catch (error) {
+      console.warn('Failed to load camera distance', error);
+    }
+  }
+
+  private persistCameraDistance(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    if (this.controls.cameraPOV !== 'orbit') {
+      return;
+    }
+
+    const current = this.cameraRig.getDistance();
+    if (Math.abs(current - this.lastSavedCameraDistance) < 0.05) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(CAMERA_DISTANCE_STORAGE_KEY, current.toFixed(3));
+      this.lastSavedCameraDistance = current;
+    } catch (error) {
+      console.warn('Failed to persist camera distance', error);
+    }
+  }
+
   private applyStrafe(amount: number): void {
     const clamped = clamp(amount, -1, 1);
     if (Math.abs(clamped) < 0.05) {
@@ -464,24 +536,54 @@ export class Game {
   }
 
   private toggleCamera = (): void => {
+    const next = this.controls.cameraPOV === 'orbit' ? 'chase' : 'orbit';
+    this.setCameraMode(next);
+  };
+
+  private setCameraMode(mode: ControlMode): void {
     if (!this.player) {
+      this.controls.cameraPOV = mode;
+      this.updateCameraViewLabel();
       return;
     }
 
-    const playerObject = this.player.object;
-    if (this.controls.cameraPOV === 'world') {
-      this.controls.cameraPOV = 'player';
-      this.cameraControls.saveState();
-      playerObject.add(this.camera);
-      this.camera.position.set(0, 10, -20);
-      const lookAtTarget = playerObject.position.clone().add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(lookAtTarget);
-    } else {
-      this.controls.cameraPOV = 'world';
-      playerObject.remove(this.camera);
-      this.cameraControls.reset();
+    if (this.controls.cameraPOV === mode) {
+      this.updateCameraViewLabel();
+      return;
     }
-  };
+
+    if (mode === 'chase') {
+      this.savedWorldRigState = {
+        distance: this.cameraRig.getDistance(),
+        pitch: this.cameraRig.getPitch(),
+        yaw: this.cameraRig.getYaw()
+      };
+      this.forwardVector.set(0, 0, -1).applyQuaternion(this.player.object.quaternion).normalize();
+      const yaw = Math.atan2(-this.forwardVector.x, -this.forwardVector.z);
+      this.cameraRig.setYaw(yaw);
+      this.cameraRig.setPitch(THREE.MathUtils.degToRad(22));
+      this.cameraRig.setDistance(4.5);
+    } else if (this.savedWorldRigState) {
+      this.cameraRig.setYaw(this.savedWorldRigState.yaw);
+      this.cameraRig.setPitch(this.savedWorldRigState.pitch);
+      this.cameraRig.setDistance(this.savedWorldRigState.distance);
+      this.savedWorldRigState = null;
+    } else {
+      this.cameraRig.setYaw(Math.PI * 0.25);
+      this.cameraRig.setPitch(THREE.MathUtils.degToRad(35));
+      this.cameraRig.setDistance(7);
+    }
+
+    this.controls.cameraPOV = mode;
+    this.updateCameraRigTarget();
+    this.cameraRig.enforceGround(0, 0.2);
+    this.updateCameraViewLabel();
+  }
+
+  private updateCameraViewLabel(): void {
+    const label = this.controls.cameraPOV === 'orbit' ? 'Orbit' : 'Chase';
+    this.inputs?.setCameraViewLabel(label);
+  }
 
   private setGuiVisibility(visible: boolean): void {
     this.guiVisible = visible;
@@ -517,21 +619,4 @@ export class Game {
     this.renderer.setSize(this.width, this.height);
   }
 
-  private handleDblClick(event: MouseEvent): void {
-    const mousePos = new THREE.Vector2();
-    const raycaster = new THREE.Raycaster();
-
-    mousePos.x = (event.clientX / this.width) * 2 - 1;
-    mousePos.y = (event.clientY / this.height) * 2 - 1;
-
-    raycaster.setFromCamera(mousePos, this.camera);
-
-    const intersects = raycaster.intersectObjects(this.scene.children, false);
-
-    if (intersects.length > 0) {
-      const first = intersects[0];
-      this.cameraControls.target.copy(first.point);
-      this.cameraControls.update();
-    }
-  }
 }

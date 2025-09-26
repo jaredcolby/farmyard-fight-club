@@ -27,7 +27,7 @@ export interface SoundDefinition {
   rate?: number;
 }
 
-export type ControlMode = 'world' | 'player';
+export type ControlMode = 'orbit' | 'chase';
 
 export type CharacterKind = 'npc' | 'player' | 'remote';
 

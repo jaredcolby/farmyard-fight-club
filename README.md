@@ -140,6 +140,13 @@ export interface InputState {
 - (If enabled) Gyro aim subtly improves fine control without drift; tilt modes can be toggled off cleanly.
 - Desktop inputs remain unchanged.
 
+### Camera Rig & Mobile View Controls
+- A single `CameraRig` now drives both gameplay and menu views, so opening overlays pauses input without snapping the camera.
+- Right-side drags deliver yaw and pitch together; pitch is clamped and the rig enforces a minimum ground clearance to prevent “underworld” angles.
+- Pinch gestures dolly the rig distance (persisted via `localStorage` under `FYC_CAM_DIST`); the same zoom level is restored on reload.
+- Desktop look inputs are unchanged; mobile GUI simply disables touch look while active, preserving the shared camera state.
+- Camera toggle now switches between **Orbit** (default) and **Chase** modes, with matching labels on desktop/mobile UI and intuitive first-person framing.
+
 ### Future Nice-to-Haves
 - Fixed vs relative joystick toggle
 - Simple aim assist (mobile-only)
