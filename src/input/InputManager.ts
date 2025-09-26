@@ -1,5 +1,7 @@
 import type { GUI, GUIController } from 'dat.gui';
 
+import type { CameraRig } from '../camera';
+import { TouchCameraControls } from './TouchCameraControls';
 import { KeyboardInput } from './keyboard/KeyboardInput';
 import { MobileControls } from './mobile/mobileControls';
 import { InputState, mergeInputStates, MobileControlSettings } from './types';
@@ -14,6 +16,8 @@ export class InputManager {
   private readonly mobile: MobileControls;
   private readonly guiSettings: MobileControlSettings;
   private readonly controllers: Partial<Record<keyof MobileControlSettings | 'gyroAimEnabled' | 'tiltMode', GUIController>> = {};
+  private touchCamera: TouchCameraControls | null = null;
+  private cameraRig: CameraRig | null = null;
 
   constructor(private readonly toggleCamera: () => void, private readonly toggleGui: () => void) {
     this.keyboard = new KeyboardInput(() => this.toggleCamera(), () => this.toggleGui());
@@ -28,12 +32,19 @@ export class InputManager {
     this.keyboard.register();
     if (this.mobile.canEnable()) {
       this.mobile.mount();
+      this.ensureTouchCameraControls();
     }
   }
 
   dispose(): void {
     this.keyboard.dispose();
     this.mobile.dispose();
+    this.touchCamera?.dispose();
+    this.touchCamera = null;
+  }
+
+  update(dt: number): void {
+    this.touchCamera?.update(dt);
   }
 
   read(): InputState {
@@ -42,12 +53,18 @@ export class InputManager {
       const mobileState = this.mobile.read();
       mergeInputStates(state, mobileState);
     }
+    if (this.touchCamera) {
+      const delta = this.touchCamera.consumeRotationDelta();
+      state.lookDelta.x += delta.x;
+      state.lookDelta.y += delta.y;
+    }
     return state;
   }
 
   setMobileInteractivity(interactive: boolean): void {
     if (this.mobile.canEnable()) {
       this.mobile.setInteractive(interactive);
+      this.touchCamera?.setEnabled(interactive);
     }
   }
 
@@ -137,9 +154,49 @@ export class InputManager {
   private syncSetting(partial: Partial<MobileControlSettings>): void {
     const next = this.mobile.updateSettings(partial);
     Object.assign(this.guiSettings, next);
+    this.applyTouchCameraSettings();
   }
 
   private refreshControllers(): void {
     Object.values(this.controllers).forEach(controller => controller?.updateDisplay());
+  }
+
+  bindCameraRig(rig: CameraRig): void {
+    this.cameraRig = rig;
+    this.ensureTouchCameraControls();
+    this.touchCamera?.attach(rig);
+    this.applyTouchCameraSettings();
+  }
+
+  private ensureTouchCameraControls(): void {
+    if (this.touchCamera || !this.mobile.canEnable()) {
+      return;
+    }
+
+    const layer = this.mobile.getLayer();
+    if (!layer) {
+      return;
+    }
+
+    this.touchCamera = new TouchCameraControls(layer);
+    if (this.cameraRig) {
+      this.touchCamera.attach(this.cameraRig);
+    }
+    this.applyTouchCameraSettings();
+  }
+
+  private applyTouchCameraSettings(): void {
+    if (!this.touchCamera) {
+      return;
+    }
+    this.touchCamera.setSensitivity(this.guiSettings.lookSensitivity);
+    this.touchCamera.setInvertY(this.guiSettings.invertY);
+  }
+
+  setCameraViewLabel(label: string): void {
+    if (!this.mobile.canEnable()) {
+      return;
+    }
+    this.mobile.setCameraButtonLabel(label);
   }
 }
