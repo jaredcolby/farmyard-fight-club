@@ -48,7 +48,10 @@ export type ServerMessage =
   | { type: 'player-leave'; id: string }
   | { type: 'pong'; timestamp: number };
 
-export type ClientMessage = { type: 'state'; player: PlayerSnapshot } | { type: 'ping'; timestamp: number };
+export type ClientMessage =
+  | { type: 'join'; room: string }
+  | { type: 'state'; player: PlayerSnapshot }
+  | { type: 'ping'; timestamp: number };
 
 export interface MultiplayerOptions {
   url: string;

@@ -1,5 +1,7 @@
 import type { ClientMessage, MultiplayerOptions, PlayerSnapshot, ServerMessage } from './types';
 import type { Game } from './Game';
+import { makeWsUrl } from '../net/ws-url';
+import { ROOM_ID } from '../net/room';
 
 const DEFAULT_UPDATE_INTERVAL_MS = 120;
 
@@ -8,9 +10,10 @@ export class MultiplayerClient {
   private readonly options: Required<MultiplayerOptions>;
   private playerId: string | null = null;
   private lastSentAt = 0;
+  private readonly roomId = ROOM_ID;
 
   constructor(private readonly game: Game, options: Partial<MultiplayerOptions> = {}) {
-    const url = options.url ?? (import.meta.env.VITE_MULTIPLAYER_URL ?? 'ws://localhost:3001');
+    const url = options.url ?? makeWsUrl();
     const updateIntervalMs = options.updateIntervalMs ?? DEFAULT_UPDATE_INTERVAL_MS;
     this.options = { url, updateIntervalMs };
   }
@@ -75,6 +78,17 @@ export class MultiplayerClient {
 
   private handleOpen = (): void => {
     console.info('[multiplayer] connected');
+    if (!this.socket) {
+      return;
+    }
+
+    const joinMessage: ClientMessage = { type: 'join', room: this.roomId };
+
+    try {
+      this.socket.send(JSON.stringify(joinMessage));
+    } catch (error) {
+      console.error('[multiplayer] failed to send join message', error);
+    }
   };
 
   private handleClose = (): void => {

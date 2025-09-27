@@ -12,7 +12,10 @@ type PlayerSnapshot = {
   timestamp: number;
 };
 
-type ClientMessage = { type: 'state'; player: PlayerSnapshot } | { type: 'ping'; timestamp: number };
+type ClientMessage =
+  | { type: 'join'; room?: string | null }
+  | { type: 'state'; player: PlayerSnapshot }
+  | { type: 'ping'; timestamp: number };
 
 type ServerMessage =
   | { type: 'init'; id: string; players: PlayerSnapshot[] }
@@ -24,15 +27,25 @@ interface ClientRecord {
   id: string;
   socket: WebSocket;
   snapshot: PlayerSnapshot | null;
+  roomId: string;
+  joined: boolean;
 }
 
 const PORT = Number(process.env.MULTIPLAYER_PORT ?? process.env.PORT ?? 3001);
+const DEFAULT_ROOM = process.env.MULTIPLAYER_ROOM ?? 'dev-room';
+const PATH = process.env.MULTIPLAYER_PATH ?? process.env.MULTIPLAYER_WS_PATH ?? '/ws';
 
 const clients = new Map<string, ClientRecord>();
 
-const wss = new WebSocketServer({ port: PORT });
+const normalisePath = (value: string): string => (value.startsWith('/') ? value : `/${value}`);
 
-function broadcast(message: ServerMessage, excludeId?: string): void {
+const wss = new WebSocketServer({
+  host: '0.0.0.0',
+  port: PORT,
+  path: normalisePath(PATH)
+});
+
+function broadcast(message: ServerMessage, roomId: string, excludeId?: string): void {
   const payload = JSON.stringify(message);
   for (const [id, client] of clients.entries()) {
     if (excludeId && id === excludeId) {
@@ -40,6 +53,9 @@ function broadcast(message: ServerMessage, excludeId?: string): void {
     }
 
     if (client.socket.readyState === WebSocket.OPEN) {
+      if (!client.joined || client.roomId !== roomId) {
+        continue;
+      }
       client.socket.send(payload);
     }
   }
@@ -47,28 +63,46 @@ function broadcast(message: ServerMessage, excludeId?: string): void {
 
 wss.on('connection', socket => {
   const id = randomUUID();
-  const record: ClientRecord = { id, socket, snapshot: null };
+  const record: ClientRecord = { id, socket, snapshot: null, roomId: DEFAULT_ROOM, joined: false };
   clients.set(id, record);
 
   console.info(`[multiplayer] client connected: ${id}`);
-
-  const otherPlayers = Array.from(clients.values())
-    .filter(client => client.snapshot && client.id !== id)
-    .map(client => client.snapshot!)
-    .sort((a, b) => a.timestamp - b.timestamp);
-
-  const initMessage: ServerMessage = { type: 'init', id, players: otherPlayers };
-  socket.send(JSON.stringify(initMessage));
 
   socket.on('message', data => {
     try {
       const parsed = JSON.parse(data.toString()) as ClientMessage;
 
       switch (parsed.type) {
+        case 'join': {
+          const nextRoom = parsed.room?.trim() || DEFAULT_ROOM;
+          const previousRoom = record.roomId;
+
+          if (previousRoom !== nextRoom && record.snapshot) {
+            broadcast({ type: 'player-leave', id }, previousRoom, id);
+            record.snapshot = null;
+          }
+
+          record.roomId = nextRoom;
+          record.joined = true;
+
+          const otherPlayers = Array.from(clients.values())
+            .filter(client => client.joined && client.snapshot && client.id !== id && client.roomId === record.roomId)
+            .map(client => client.snapshot!)
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+          const initMessage: ServerMessage = { type: 'init', id, players: otherPlayers };
+          socket.send(JSON.stringify(initMessage));
+          break;
+        }
+
         case 'state': {
+          if (!record.joined) {
+            break;
+          }
+
           const snapshot: PlayerSnapshot = { ...parsed.player, id };
           record.snapshot = snapshot;
-          broadcast({ type: 'player-update', player: snapshot }, id);
+          broadcast({ type: 'player-update', player: snapshot }, record.roomId, id);
           break;
         }
 
@@ -87,7 +121,9 @@ wss.on('connection', socket => {
   socket.on('close', () => {
     console.info(`[multiplayer] client disconnected: ${id}`);
     clients.delete(id);
-    broadcast({ type: 'player-leave', id }, id);
+    if (record.joined) {
+      broadcast({ type: 'player-leave', id }, record.roomId, id);
+    }
   });
 
   socket.on('error', error => {
@@ -96,5 +132,5 @@ wss.on('connection', socket => {
 });
 
 wss.on('listening', () => {
-  console.info(`[multiplayer] listening on ws://localhost:${PORT}`);
+  console.info(`[multiplayer] listening on ws://0.0.0.0:${PORT}${normalisePath(PATH)}`);
 });
