@@ -475,12 +475,20 @@ export class Game {
     const offset = this.controls.cameraPOV === 'chase' ? this.cameraOffsetChase : this.cameraOffsetOrbit;
     this.cameraTarget.copy(this.player.object.position).add(offset);
     if (this.controls.cameraPOV === 'chase') {
-      this.forwardVector.set(0, 0, -1).applyQuaternion(this.player.object.quaternion).normalize();
-      this.cameraTarget.addScaledVector(this.forwardVector, this.chaseLookAhead);
-      const yaw = Math.atan2(-this.forwardVector.x, -this.forwardVector.z);
+      const forward = this.computePlayerForward();
+      this.cameraTarget.addScaledVector(forward, this.chaseLookAhead);
+      const yaw = Math.atan2(forward.x, forward.z);
       this.cameraRig.setYaw(yaw);
     }
     this.cameraRig.setTarget(this.cameraTarget);
+  }
+
+  private computePlayerForward(): THREE.Vector3 {
+    if (!this.player) {
+      return this.forwardVector.set(0, 0, -1);
+    }
+
+    return this.player.getVisualForward(this.forwardVector);
   }
 
   private loadCameraDistance(): void {
@@ -558,8 +566,8 @@ export class Game {
         pitch: this.cameraRig.getPitch(),
         yaw: this.cameraRig.getYaw()
       };
-      this.forwardVector.set(0, 0, -1).applyQuaternion(this.player.object.quaternion).normalize();
-      const yaw = Math.atan2(-this.forwardVector.x, -this.forwardVector.z);
+      const forward = this.computePlayerForward();
+      const yaw = Math.atan2(forward.x, forward.z);
       this.cameraRig.setYaw(yaw);
       this.cameraRig.setPitch(THREE.MathUtils.degToRad(22));
       this.cameraRig.setDistance(4.5);

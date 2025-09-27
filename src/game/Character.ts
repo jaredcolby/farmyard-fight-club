@@ -116,6 +116,18 @@ export class Character {
     return this.state.speed;
   }
 
+  getVisualForward(target: THREE.Vector3): THREE.Vector3 {
+    this.modelClone.getWorldDirection(target);
+    target.multiplyScalar(-1);
+    target.y = 0;
+    if (target.lengthSq() === 0) {
+      target.set(0, 0, -1);
+    } else {
+      target.normalize();
+    }
+    return target;
+  }
+
   update(deltaTime: number): void {
     const direction = new THREE.Vector3();
     this.object.getWorldDirection(direction);

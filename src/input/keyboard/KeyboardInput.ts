@@ -35,11 +35,11 @@ export class KeyboardInput {
     }
 
     if (this.isPressed('ArrowLeft')) {
-      input.lookDelta.x += TURN_INCREMENT;
+      input.lookDelta.x -= TURN_INCREMENT;
     }
 
     if (this.isPressed('ArrowRight')) {
-      input.lookDelta.x -= TURN_INCREMENT;
+      input.lookDelta.x += TURN_INCREMENT;
     }
 
     if (this.isPressed(' ')) {
