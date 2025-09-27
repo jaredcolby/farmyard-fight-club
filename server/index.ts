@@ -1,3 +1,5 @@
+import express from 'express';
+import { createServer } from 'http';
 import { randomUUID } from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -18,7 +20,7 @@ type ClientMessage =
   | { type: 'ping'; timestamp: number };
 
 type ServerMessage =
-  | { type: 'init'; id: string; players: PlayerSnapshot[] }
+  | { type: 'init'; id: string; roomId: string; players: PlayerSnapshot[] }
   | { type: 'player-update'; player: PlayerSnapshot }
   | { type: 'player-leave'; id: string }
   | { type: 'pong'; timestamp: number };
@@ -39,25 +41,34 @@ const clients = new Map<string, ClientRecord>();
 
 const normalisePath = (value: string): string => (value.startsWith('/') ? value : `/${value}`);
 
+const app = express();
+const server = createServer(app);
+
 const wss = new WebSocketServer({
-  host: '0.0.0.0',
-  port: PORT,
+  server,
   path: normalisePath(PATH)
 });
 
+function peersInRoom(roomId: string, excludeId?: string): ClientRecord[] {
+  return Array.from(clients.values()).filter(client => {
+    if (excludeId && client.id === excludeId) {
+      return false;
+    }
+    return client.joined && client.roomId === roomId && client.socket.readyState === WebSocket.OPEN;
+  });
+}
+
+function playersInRoom(roomId: string, excludeId?: string): PlayerSnapshot[] {
+  return Array.from(clients.values())
+    .filter(client => client.joined && client.snapshot && client.roomId === roomId && client.id !== excludeId)
+    .map(client => client.snapshot!)
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
 function broadcast(message: ServerMessage, roomId: string, excludeId?: string): void {
   const payload = JSON.stringify(message);
-  for (const [id, client] of clients.entries()) {
-    if (excludeId && id === excludeId) {
-      continue;
-    }
-
-    if (client.socket.readyState === WebSocket.OPEN) {
-      if (!client.joined || client.roomId !== roomId) {
-        continue;
-      }
-      client.socket.send(payload);
-    }
+  for (const client of peersInRoom(roomId, excludeId)) {
+    client.socket.send(payload);
   }
 }
 
@@ -85,12 +96,9 @@ wss.on('connection', socket => {
           record.roomId = nextRoom;
           record.joined = true;
 
-          const otherPlayers = Array.from(clients.values())
-            .filter(client => client.joined && client.snapshot && client.id !== id && client.roomId === record.roomId)
-            .map(client => client.snapshot!)
-            .sort((a, b) => a.timestamp - b.timestamp);
+          const otherPlayers = playersInRoom(record.roomId, id);
 
-          const initMessage: ServerMessage = { type: 'init', id, players: otherPlayers };
+          const initMessage: ServerMessage = { type: 'init', id, roomId: record.roomId, players: otherPlayers };
           socket.send(JSON.stringify(initMessage));
           break;
         }
@@ -130,7 +138,15 @@ wss.on('connection', socket => {
     console.error('[multiplayer] socket error', error);
   });
 });
+app.get('/debug/rooms', (_req, res) => {
+  const byRoom: Record<string, string[]> = {};
+  for (const client of clients.values()) {
+    const room = client.roomId ?? DEFAULT_ROOM;
+    (byRoom[room] ??= []).push(client.id);
+  }
+  res.json(byRoom);
+});
 
-wss.on('listening', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.info(`[multiplayer] listening on ws://0.0.0.0:${PORT}${normalisePath(PATH)}`);
 });

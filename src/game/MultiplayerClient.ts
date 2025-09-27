@@ -11,6 +11,8 @@ export class MultiplayerClient {
   private playerId: string | null = null;
   private lastSentAt = 0;
   private readonly roomId = ROOM_ID;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private suppressReconnect = false;
 
   constructor(private readonly game: Game, options: Partial<MultiplayerOptions> = {}) {
     const url = options.url ?? makeWsUrl();
@@ -23,7 +25,10 @@ export class MultiplayerClient {
       return;
     }
 
+    console.log('[room]', this.roomId, window.location.href);
+
     this.dispose();
+    this.clearReconnectTimer();
 
     try {
       this.socket = new WebSocket(this.options.url);
@@ -58,9 +63,13 @@ export class MultiplayerClient {
   }
 
   dispose(): void {
+    this.clearReconnectTimer();
+
     if (!this.socket) {
       return;
     }
+
+    this.suppressReconnect = true;
 
     this.socket.removeEventListener('open', this.handleOpen);
     this.socket.removeEventListener('message', this.handleMessage);
@@ -82,9 +91,12 @@ export class MultiplayerClient {
       return;
     }
 
+    this.clearReconnectTimer();
+    this.lastSentAt = 0;
     const joinMessage: ClientMessage = { type: 'join', room: this.roomId };
 
     try {
+      console.log('[ws] open → join room', this.roomId);
       this.socket.send(JSON.stringify(joinMessage));
     } catch (error) {
       console.error('[multiplayer] failed to send join message', error);
@@ -93,8 +105,16 @@ export class MultiplayerClient {
 
   private handleClose = (): void => {
     console.info('[multiplayer] disconnected');
+    this.socket = null;
     this.playerId = null;
     this.game.clearRemotePlayers();
+
+    if (this.suppressReconnect) {
+      this.suppressReconnect = false;
+      return;
+    }
+
+    this.scheduleReconnect();
   };
 
   private handleError = (event: Event): void => {
@@ -109,6 +129,9 @@ export class MultiplayerClient {
         case 'init':
           this.playerId = payload.id;
           this.game.setLocalPlayerId(payload.id);
+          if (payload.roomId !== this.roomId) {
+            console.warn('[multiplayer] joined unexpected room', payload.roomId, 'expected', this.roomId);
+          }
           payload.players.forEach(snapshot => this.game.applyRemoteSnapshot(snapshot));
           break;
 
@@ -130,4 +153,26 @@ export class MultiplayerClient {
       console.error('[multiplayer] failed to parse message', event.data, error);
     }
   };
+
+  private scheduleReconnect(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (this.reconnectTimer !== null) {
+      return;
+    }
+
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 500);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
 }
