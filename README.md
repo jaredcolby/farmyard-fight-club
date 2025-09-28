@@ -10,18 +10,17 @@ ___
 #### DEVELOPMENT SETUP
 
 ```bash
-# install dependencies
+# install dependencies once
 npm install
 
-# run the multiplayer websocket hub (terminal 1)
-npm run server
-
-# start the Vite dev server (terminal 2)
+# launch websocket server + Vite together
 npm run dev
 ```
 
-- Game runs at http://localhost:5173 by default.
-- Multiplayer hub listens on ws://localhost:3001/ws (proxied via http://localhost:5173/ws); override with `MULTIPLAYER_PORT` or the `VITE_WS_*` (`VITE_WS_URL`, `VITE_WS_HOST`, `VITE_WS_PORT`, `VITE_WS_PATH`) variables when needed.
+- `npm run dev` uses [`concurrently`](https://github.com/open-cli-tools/concurrently) to start the multiplayer hub (ws://0.0.0.0:3001/ws) and Vite (http://localhost:5173) in a single terminal. Use `npm run dev:client` if you only need the Vite process running.
+- When both processes are running, open `http://localhost:5173/?room=dev-room` (or your LAN IP) on each device. The client auto-sends `{ type: 'join', room }` on every connect/reconnect.
+- Quickly confirm room membership via `fetch('/debug/rooms').then(r => r.json())` or by visiting `http://localhost:5173/debug/rooms`; you should see a JSON map of room IDs to client IDs.
+- Override networking defaults with `MULTIPLAYER_PORT` for the server or `VITE_WS_*` (`VITE_WS_URL`, `VITE_WS_HOST`, `VITE_WS_PORT`, `VITE_WS_PATH`) for the client when deviating from the proxied `ws://localhost:5173/ws` path.
 - Build for production with `npm run build` and preview with `npm run preview`.
 
 ![screenshot](screenshot.png)
