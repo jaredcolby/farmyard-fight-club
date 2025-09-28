@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GUI } from 'dat.gui';
 import Stats from 'stats.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 import type { ControlMode, ModelDefinition, PlayerSnapshot } from './types';
@@ -11,6 +10,9 @@ import type { InputState } from '../input/types';
 import { SceneryManager } from './Scenery';
 import { AudioManager } from './audio';
 import { MultiplayerClient } from './MultiplayerClient';
+import { CameraRig } from './camera/CameraRig';
+import { MobileDualSticks } from './controls/MobileDualSticks';
+import { getCameraMode, initControls, setCameraMode, shouldShowJoysticks } from '../settings/controls';
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -35,7 +37,7 @@ export class Game {
   private readonly scene = new THREE.Scene();
   private readonly renderer = new THREE.WebGLRenderer();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly cameraControls: OrbitControls;
+  private readonly cameraRig: CameraRig;
   private readonly spotlight = new THREE.SpotLight(0xffffff);
   private readonly ambient = new THREE.AmbientLight(0xeeeeee);
   private readonly stats = new Stats();
@@ -49,6 +51,8 @@ export class Game {
   private inputs!: InputManager;
   private scenery!: SceneryManager;
   private audio!: AudioManager;
+  private mobileSticks: MobileDualSticks | null = null;
+  private readonly debugMobile = new URLSearchParams(window.location.search).get('debug') === '1';
 
   private models: Map<string, ModelDefinition> = new Map();
   private multiplayer?: MultiplayerClient;
@@ -63,13 +67,13 @@ export class Game {
 
   constructor(private readonly outputSelector = '#output', private readonly statsSelector = '#stats') {
     this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 1, 2000);
-    this.cameraControls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.cameraRig = new CameraRig(this.camera);
 
     this.handleResize = this.handleResize.bind(this);
-    this.handleDblClick = this.handleDblClick.bind(this);
   }
 
   async start(): Promise<void> {
+    initControls();
     this.setupGui();
     this.setupRenderer();
     this.setupLighting();
@@ -77,7 +81,12 @@ export class Game {
     this.setupSkybox();
     this.setupStats();
 
+    this.cameraRig.attachTo(this.scene);
+    this.cameraRig.setMode(getCameraMode());
+
     await this.initCharacters();
+    this.cameraRig.setFollowTarget(this.player.object);
+    this.cameraRig.setYaw(this.player.object.rotation.y);
 
     this.scenery = new SceneryManager(this.scene);
     await this.scenery.load();
@@ -88,10 +97,12 @@ export class Game {
     this.inputs = new InputManager(this.toggleCamera, this.toggleGuiVisibility);
     this.inputs.register();
     this.setGuiVisibility(false);
-    this.inputs.attachToGui(this.gui);
+
+    if (shouldShowJoysticks()) {
+      this.mobileSticks = new MobileDualSticks({ debug: this.debugMobile });
+    }
 
     window.addEventListener('resize', this.handleResize);
-    window.addEventListener('dblclick', this.handleDblClick);
 
     this.multiplayer = new MultiplayerClient(this);
     this.multiplayer.connect();
@@ -101,11 +112,11 @@ export class Game {
 
   dispose(): void {
     window.removeEventListener('resize', this.handleResize);
-    window.removeEventListener('dblclick', this.handleDblClick);
     this.inputs?.dispose();
     this.multiplayer?.dispose();
     this.clearRemotePlayers();
     this.gui.destroy();
+    this.mobileSticks?.dispose();
   }
 
   get sceneRef(): THREE.Scene {
@@ -130,10 +141,6 @@ export class Game {
 
   getCamera(): THREE.PerspectiveCamera {
     return this.camera;
-  }
-
-  getCameraControls(): OrbitControls {
-    return this.cameraControls;
   }
 
   getRenderer(): THREE.WebGLRenderer {
@@ -374,17 +381,27 @@ export class Game {
 
   private animate = (now: number): void => {
     const seconds = now * 0.001;
-    const deltaTime = seconds - this.lastAnimateTime;
+    const rawDelta = seconds - this.lastAnimateTime;
     this.lastAnimateTime = seconds;
+    const deltaTime = Math.min(Math.max(rawDelta, 0), 0.1);
 
     const input = this.inputs.read();
-    this.applyInput(input);
 
-    if (this.controls.cameraPOV === 'player') {
-      const charPos = this.player.object.position.clone();
-      charPos.add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(charPos);
+    let mobileMagnitude = 0;
+    if (this.mobileSticks) {
+      this.mobileSticks.update(deltaTime);
+      const mobileActions = this.mobileSticks.getActions();
+      input.actions.primary = input.actions.primary || mobileActions.primary;
+      input.actions.secondary = input.actions.secondary || mobileActions.secondary;
+      input.actions.jump = input.actions.jump || mobileActions.jump;
+      mobileMagnitude = this.mobileSticks.applyMovement(this.player, this.cameraRig, deltaTime);
+      this.mobileSticks.applyCamera(this.player, this.cameraRig, deltaTime);
     }
+
+    this.applyInput(input, deltaTime, mobileMagnitude);
+
+    this.cameraRig.update(deltaTime);
+    this.mobileSticks?.afterCameraUpdate(this.player, this.cameraRig, deltaTime);
 
     this.player.update(deltaTime);
     Character.each(character => {
@@ -400,31 +417,37 @@ export class Game {
     requestAnimationFrame(this.animate);
   };
 
-  private applyInput(input: InputState): void {
+  private applyInput(input: InputState, _deltaTime: number, mobileMagnitude: number): void {
     if (!this.player) {
       return;
     }
 
     if (input.lookDelta.x !== 0) {
-      this.player.object.rotateY(-input.lookDelta.x);
+      this.cameraRig.addYaw(-input.lookDelta.x);
     }
 
-    if (Math.abs(input.move.x) > 0.05) {
+    if (mobileMagnitude <= 0 && Math.abs(input.move.x) > 0.05) {
       this.applyStrafe(input.move.x);
     }
 
     if (input.actions.jump && !this.jumpHeld) {
       this.jumpHeld = true;
-      this.audio.setPlaybackRate('walk', 0.5);
-      this.audio.play('walk');
+      this.handleWalkAudio(0.5);
       this.player.changeState('jump', { force: true });
     } else if (!input.actions.jump && this.jumpHeld) {
       this.jumpHeld = false;
-      this.audio.stop('walk');
-      this.walkAudioPlaying = false;
+      this.stopWalkAudio();
     }
 
     if (this.jumpHeld) {
+      return;
+    }
+
+    if (mobileMagnitude > 0) {
+      const intensity = clamp(mobileMagnitude, 0, 1);
+      const timeScale = Math.max(0.5, intensity);
+      this.player.changeState('walk', { walkSpeed: intensity, timeScale, force: true });
+      this.handleWalkAudio(timeScale);
       return;
     }
 
@@ -436,18 +459,11 @@ export class Game {
       const direction = Math.sign(forward) || 1;
       const timeScale = direction * Math.max(0.5, magnitude);
       this.player.changeState('walk', { walkSpeed: forward, timeScale, force: true });
-      this.audio.setPlaybackRate('walk', Math.abs(timeScale));
-      if (!this.walkAudioPlaying) {
-        this.audio.play('walk');
-        this.walkAudioPlaying = true;
-      }
+      this.handleWalkAudio(Math.abs(timeScale));
     } else {
+      this.stopWalkAudio();
       if (this.player.getCurrentState() !== 'idle') {
         this.player.changeState('idle');
-      }
-      if (this.walkAudioPlaying) {
-        this.audio.stop('walk');
-        this.walkAudioPlaying = false;
       }
     }
   }
@@ -463,24 +479,28 @@ export class Game {
     this.player.object.position.addScaledVector(this.tempRight, clamped * this.walkSpeed);
   }
 
-  private toggleCamera = (): void => {
-    if (!this.player) {
+  private handleWalkAudio(rate: number): void {
+    this.audio.setPlaybackRate('walk', rate);
+    if (!this.walkAudioPlaying) {
+      this.audio.play('walk');
+      this.walkAudioPlaying = true;
+    }
+  }
+
+  private stopWalkAudio(): void {
+    if (!this.walkAudioPlaying) {
       return;
     }
+    this.audio.stop('walk');
+    this.walkAudioPlaying = false;
+  }
 
-    const playerObject = this.player.object;
-    if (this.controls.cameraPOV === 'world') {
-      this.controls.cameraPOV = 'player';
-      this.cameraControls.saveState();
-      playerObject.add(this.camera);
-      this.camera.position.set(0, 10, -20);
-      const lookAtTarget = playerObject.position.clone().add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(lookAtTarget);
-    } else {
-      this.controls.cameraPOV = 'world';
-      playerObject.remove(this.camera);
-      this.cameraControls.reset();
-    }
+  private toggleCamera = (): void => {
+    const current = getCameraMode();
+    const next = current === 'chase' ? 'fpv' : 'chase';
+    setCameraMode(next);
+    this.cameraRig.setMode(next);
+    this.controls.cameraPOV = next === 'chase' ? 'world' : 'player';
   };
 
   private setGuiVisibility(visible: boolean): void {
@@ -493,15 +513,15 @@ export class Game {
         this.gui.domElement.style.display = '';
       }
       this.gui.domElement.classList.add('gui-visible');
-      this.inputs.setMobileInteractivity(false);
+      this.mobileSticks?.setInteractive(false);
     } else if (guiWithVisibility.hide) {
       guiWithVisibility.hide();
       this.gui.domElement.classList.remove('gui-visible');
-      this.inputs.setMobileInteractivity(true);
+      this.mobileSticks?.setInteractive(true);
     } else {
       this.gui.domElement.style.display = 'none';
       this.gui.domElement.classList.remove('gui-visible');
-      this.inputs.setMobileInteractivity(true);
+      this.mobileSticks?.setInteractive(true);
     }
   }
 
@@ -517,21 +537,4 @@ export class Game {
     this.renderer.setSize(this.width, this.height);
   }
 
-  private handleDblClick(event: MouseEvent): void {
-    const mousePos = new THREE.Vector2();
-    const raycaster = new THREE.Raycaster();
-
-    mousePos.x = (event.clientX / this.width) * 2 - 1;
-    mousePos.y = (event.clientY / this.height) * 2 - 1;
-
-    raycaster.setFromCamera(mousePos, this.camera);
-
-    const intersects = raycaster.intersectObjects(this.scene.children, false);
-
-    if (intersects.length > 0) {
-      const first = intersects[0];
-      this.cameraControls.target.copy(first.point);
-      this.cameraControls.update();
-    }
-  }
 }

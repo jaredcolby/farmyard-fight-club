@@ -22,6 +22,7 @@ export class ActionButtons {
   constructor(private readonly layer: HTMLElement) {
     this.container = document.createElement('div');
     this.container.className = 'touch-actions';
+    this.container.id = 'action-buttons';
 
     BUTTON_CONFIG.forEach(({ key, label }) => {
       const element = document.createElement('button');
@@ -56,6 +57,10 @@ export class ActionButtons {
 
   getState(): InputActions {
     return { ...this.states };
+  }
+
+  getBounds(): DOMRect | null {
+    return this.container.isConnected ? this.container.getBoundingClientRect() : null;
   }
 
   private handlePointerDown(event: PointerEvent, key: keyof InputActions): void {
