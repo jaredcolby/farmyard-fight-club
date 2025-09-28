@@ -13,7 +13,6 @@ import {
   initControls,
   isInvertedY,
   isLeftHanded,
-  isSnapEnabledFor,
   setLeftHanded,
   shouldShowJoysticks
 } from '../../settings/controls';
@@ -32,10 +31,11 @@ interface KeepOutRect {
 interface MobileDualSticksOptions {
   root?: HTMLElement;
   debug?: boolean;
+  onToggleCamera?: () => void;
+  onToggleMenu?: () => void;
 }
 
 const DEAD_ZONE = Controls.deadZone;
-const SNAP_EPSILON = 1e-3;
 
 export class MobileDualSticks {
   private readonly root: HTMLDivElement;
@@ -65,6 +65,7 @@ export class MobileDualSticks {
 
   private readonly hud?: StickHUD;
   private readonly handednessButton: HTMLButtonElement;
+  private utilities: HTMLDivElement | null = null;
 
   private readonly allowMouseInput: boolean;
   private snapCorrection = 0;
@@ -99,6 +100,7 @@ export class MobileDualSticks {
     });
 
     this.handednessButton = this.createHandednessToggle();
+    this.utilities = this.createUtilities();
 
     if (options.debug) {
       this.hud = new StickHUD(document.body);
@@ -106,6 +108,7 @@ export class MobileDualSticks {
 
     window.addEventListener('resize', this.handleResize, { passive: true });
     this.applyHandedness(isLeftHanded());
+    this.updateKeepOut();
 
     if (shouldShowJoysticks()) {
       this.root.classList.remove('hidden');
@@ -117,6 +120,7 @@ export class MobileDualSticks {
     this.buttons.dispose();
     this.leftStick.dispose();
     this.rightStick.dispose();
+    this.utilities?.remove();
     this.hud?.dispose();
     this.root.remove();
   }
@@ -159,7 +163,11 @@ export class MobileDualSticks {
       return 0;
     }
 
+    const mode = getCameraMode();
     const cameraForward = cameraRig.getForward(this.forward);
+    if (mode === 'chase') {
+      cameraForward.multiplyScalar(-1);
+    }
     cameraForward.y = 0;
     if (cameraForward.lengthSq() < 1e-5) {
       cameraForward.set(0, 0, -1);
@@ -170,7 +178,7 @@ export class MobileDualSticks {
 
     this.moveVector
       .copy(cameraRight)
-      .multiplyScalar(this.leftValue.x)
+      .multiplyScalar(-this.leftValue.x)
       .addScaledVector(cameraForward, this.leftValue.y);
 
     const magnitude = this.moveVector.length();
@@ -183,7 +191,7 @@ export class MobileDualSticks {
     const displacement = Controls.moveSpeed * this.leftValue.magnitude * deltaTime;
     player.object.position.addScaledVector(this.moveVector, displacement);
 
-    const targetYaw = Math.atan2(this.moveVector.x, this.moveVector.z);
+    const targetYaw = Math.atan2(this.moveVector.x, -this.moveVector.z);
     const currentYaw = cameraUtils.normaliseAngle(player.object.rotation.y);
     const yawDelta = cameraUtils.shortestAngleDiff(currentYaw, targetYaw);
     const rotationStep = yawDelta * (1 - Math.exp(-10 * deltaTime));
@@ -192,7 +200,7 @@ export class MobileDualSticks {
     return this.leftValue.magnitude;
   }
 
-  applyCamera(player: Player, cameraRig: CameraRig, deltaTime: number): void {
+  applyCamera(player: Player, cameraRig: CameraRig, deltaTime: number): boolean {
     const mode = getCameraMode();
     cameraRig.setMode(mode);
 
@@ -200,41 +208,21 @@ export class MobileDualSticks {
     const invertMultiplier = isInvertedY() ? -1 : 1;
     const pitchDelta = this.rightValue.y * Controls.pitchSpeed * deltaTime * invertMultiplier;
 
+    let usedInput = false;
     if (this.rightValue.magnitude >= DEAD_ZONE) {
-      cameraRig.addYaw(yawDelta);
-      cameraRig.addPitch(pitchDelta);
+      if (Math.abs(yawDelta) > 0) {
+        cameraRig.addYaw(yawDelta);
+        usedInput = true;
+      }
+      if (Math.abs(pitchDelta) > 0) {
+        cameraRig.addPitch(pitchDelta);
+        usedInput = true;
+      }
       this.snapping = false;
       this.snapCorrection = 0;
-    } else {
-      this.applySnap(player, cameraRig, mode, deltaTime);
     }
     this.tempHudSample.mode = mode;
-  }
-
-  private applySnap(player: Player, cameraRig: CameraRig, mode: CameraMode, deltaTime: number): void {
-    this.snapping = false;
-    this.snapCorrection = 0;
-
-    if (!isSnapEnabledFor(mode)) {
-      return;
-    }
-
-    const gain = mode === 'chase' ? Controls.snapChaseStrength : Controls.snapFpvStrength;
-    if (mode === 'chase') {
-      const beforeYaw = cameraRig.getYaw();
-      cameraRig.alignYawToObject(player.object, gain, deltaTime);
-      cameraRig.alignPitchTo(this.getChasePitchTarget(), gain, deltaTime);
-      const afterYaw = cameraRig.getYaw();
-      this.snapCorrection = Math.abs(cameraUtils.shortestAngleDiff(afterYaw, beforeYaw));
-      this.snapping = this.snapCorrection > SNAP_EPSILON;
-    } else {
-      const beforeYaw = cameraRig.getYaw();
-      cameraRig.alignYawToObject(player.object, gain, deltaTime);
-      cameraRig.alignPitchTo(0, gain, deltaTime);
-      const afterYaw = cameraRig.getYaw();
-      this.snapCorrection = Math.abs(cameraUtils.shortestAngleDiff(afterYaw, beforeYaw));
-      this.snapping = this.snapCorrection > SNAP_EPSILON;
-    }
+    return usedInput;
   }
 
   private getChasePitchTarget(): number {
@@ -297,6 +285,14 @@ export class MobileDualSticks {
     this.handednessButton.textContent = leftHanded ? 'Right-side' : 'Left-side';
     this.leftStick.refreshLayout();
     this.rightStick.refreshLayout();
+    this.updateKeepOut();
+    if (this.utilities) {
+      if (leftHanded) {
+        this.utilities.classList.add('dual-sticks__utilities--left');
+      } else {
+        this.utilities.classList.remove('dual-sticks__utilities--left');
+      }
+    }
   }
 
   private createHandednessToggle(): HTMLButtonElement {
@@ -323,6 +319,44 @@ export class MobileDualSticks {
     });
     this.root.appendChild(button);
     return button;
+  }
+
+  private createUtilities(): HTMLDivElement | null {
+    const actions: Array<{ label: string; handler?: () => void; className: string }> = [
+      { label: 'Cam', handler: this.options.onToggleCamera, className: 'dual-sticks__cam' },
+      { label: 'Menu', handler: this.options.onToggleMenu, className: 'dual-sticks__menu' }
+    ];
+
+    const available = actions.filter(entry => typeof entry.handler === 'function');
+    if (available.length === 0) {
+      return null;
+    }
+
+    const container = document.createElement('div');
+    container.className = 'dual-sticks__utilities';
+
+    available.forEach(entry => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `dual-sticks__utility ${entry.className}`;
+      button.textContent = entry.label;
+      button.addEventListener('pointerdown', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        entry.handler?.();
+      });
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      container.appendChild(button);
+    });
+
+    this.root.appendChild(container);
+    if (isLeftHanded()) {
+      container.classList.add('dual-sticks__utilities--left');
+    }
+    return container;
   }
 
   private handleResize = (): void => {

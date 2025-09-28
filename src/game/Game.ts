@@ -99,7 +99,11 @@ export class Game {
     this.setGuiVisibility(false);
 
     if (shouldShowJoysticks()) {
-      this.mobileSticks = new MobileDualSticks({ debug: this.debugMobile });
+      this.mobileSticks = new MobileDualSticks({
+        debug: this.debugMobile,
+        onToggleCamera: this.toggleCamera,
+        onToggleMenu: this.toggleGuiVisibility
+      });
     }
 
     window.addEventListener('resize', this.handleResize);
@@ -388,6 +392,7 @@ export class Game {
     const input = this.inputs.read();
 
     let mobileMagnitude = 0;
+    let mobileCameraInput = false;
     if (this.mobileSticks) {
       this.mobileSticks.update(deltaTime);
       const mobileActions = this.mobileSticks.getActions();
@@ -395,12 +400,22 @@ export class Game {
       input.actions.secondary = input.actions.secondary || mobileActions.secondary;
       input.actions.jump = input.actions.jump || mobileActions.jump;
       mobileMagnitude = this.mobileSticks.applyMovement(this.player, this.cameraRig, deltaTime);
-      this.mobileSticks.applyCamera(this.player, this.cameraRig, deltaTime);
+      mobileCameraInput = this.mobileSticks.applyCamera(this.player, this.cameraRig, deltaTime) || mobileCameraInput;
     }
 
-    this.applyInput(input, deltaTime, mobileMagnitude);
+    const desktopCameraInput = this.applyInput(input, deltaTime, mobileMagnitude);
+    const hasCameraInput = mobileCameraInput || desktopCameraInput;
 
-    this.cameraRig.update(deltaTime);
+    const forwardMoving = this.player ? this.player.getSpeed() > 0.05 : false;
+    const lateralMoving = mobileMagnitude <= 0 && Math.abs(input.move.x) > 0.05;
+    const isMoving = forwardMoving || lateralMoving;
+    const desiredForwardYaw = this.player ? this.player.object.rotation.y : this.cameraRig.getYaw();
+
+    this.cameraRig.tick(deltaTime, {
+      hasCamInput: hasCameraInput,
+      isMoving,
+      desiredForwardYaw
+    });
     this.mobileSticks?.afterCameraUpdate(this.player, this.cameraRig, deltaTime);
 
     this.player.update(deltaTime);
@@ -417,13 +432,21 @@ export class Game {
     requestAnimationFrame(this.animate);
   };
 
-  private applyInput(input: InputState, _deltaTime: number, mobileMagnitude: number): void {
+  private applyInput(input: InputState, _deltaTime: number, mobileMagnitude: number): boolean {
     if (!this.player) {
-      return;
+      return false;
     }
+
+    let usedCameraInput = false;
 
     if (input.lookDelta.x !== 0) {
       this.cameraRig.addYaw(-input.lookDelta.x);
+      usedCameraInput = true;
+    }
+
+    if (input.lookDelta.y !== 0) {
+      this.cameraRig.addPitch(input.lookDelta.y);
+      usedCameraInput = true;
     }
 
     if (mobileMagnitude <= 0 && Math.abs(input.move.x) > 0.05) {
@@ -440,7 +463,7 @@ export class Game {
     }
 
     if (this.jumpHeld) {
-      return;
+      return usedCameraInput;
     }
 
     if (mobileMagnitude > 0) {
@@ -448,7 +471,7 @@ export class Game {
       const timeScale = Math.max(0.5, intensity);
       this.player.changeState('walk', { walkSpeed: intensity, timeScale, force: true });
       this.handleWalkAudio(timeScale);
-      return;
+      return usedCameraInput;
     }
 
     const forward = clamp(input.move.y, -1, 1);
@@ -466,6 +489,8 @@ export class Game {
         this.player.changeState('idle');
       }
     }
+
+    return usedCameraInput;
   }
 
   private applyStrafe(amount: number): void {
