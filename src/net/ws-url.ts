@@ -4,11 +4,19 @@ const DEFAULT_PATH = '/ws';
 
 const normalisePath = (value: string): string => (value.startsWith('/') ? value : `/${value}`);
 
+const normaliseInput = (value?: string | null): string | undefined => {
+  if (value == null) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 const resolvePath = (params?: URLSearchParams): string => {
-  const searchValue = params?.get('wsPath');
+  const searchValue = normaliseInput(params?.get('wsPath'));
   const envValue =
-    (import.meta.env?.VITE_WS_PATH as string | undefined) ??
-    (import.meta.env?.VITE_MULTIPLAYER_PATH as string | undefined);
+    normaliseInput(import.meta.env?.VITE_WS_PATH as string | undefined) ??
+    normaliseInput(import.meta.env?.VITE_MULTIPLAYER_PATH as string | undefined);
   return normalisePath(searchValue ?? envValue ?? DEFAULT_PATH);
 };
 
@@ -17,12 +25,12 @@ export const WS_PATH = resolvePath();
 export const makeWsUrl = (): string => {
   if (typeof window === 'undefined') {
     const host =
-      (import.meta.env?.VITE_WS_HOST as string | undefined) ??
-      (import.meta.env?.VITE_MULTIPLAYER_HOST as string | undefined) ??
+      normaliseInput(import.meta.env?.VITE_WS_HOST as string | undefined) ??
+      normaliseInput(import.meta.env?.VITE_MULTIPLAYER_HOST as string | undefined) ??
       'localhost';
     const port =
-      (import.meta.env?.VITE_WS_PORT as string | undefined) ??
-      (import.meta.env?.VITE_MULTIPLAYER_PORT as string | undefined) ??
+      normaliseInput(import.meta.env?.VITE_WS_PORT as string | undefined) ??
+      normaliseInput(import.meta.env?.VITE_MULTIPLAYER_PORT as string | undefined) ??
       DEFAULT_PORT;
     return `${DEFAULT_PROTOCOL}://${host}:${port}${WS_PATH}`;
   }
@@ -51,18 +59,20 @@ export const makeWsUrl = (): string => {
   }
 
   const host =
-    params.get('wsHost') ??
-    (import.meta.env?.VITE_WS_HOST as string | undefined) ??
-    (import.meta.env?.VITE_MULTIPLAYER_HOST as string | undefined) ??
+    normaliseInput(params.get('wsHost')) ??
+    normaliseInput(import.meta.env?.VITE_WS_HOST as string | undefined) ??
+    normaliseInput(import.meta.env?.VITE_MULTIPLAYER_HOST as string | undefined) ??
     window.location.hostname;
   const port =
-    params.get('wsPort') ??
-    (import.meta.env?.VITE_WS_PORT as string | undefined) ??
-    (import.meta.env?.VITE_MULTIPLAYER_PORT as string | undefined) ??
+    normaliseInput(params.get('wsPort')) ??
+    normaliseInput(import.meta.env?.VITE_WS_PORT as string | undefined) ??
+    normaliseInput(import.meta.env?.VITE_MULTIPLAYER_PORT as string | undefined) ??
     (window.location.port || DEFAULT_PORT);
 
+  const safeHost = host && host.length > 0 ? host : window.location.hostname || 'localhost';
   const address = port ? `${host}:${port}` : host;
-  return `${proto}://${address}${path}`;
+  const safeAddress = port ? `${safeHost}:${port}` : safeHost;
+  return `${proto}://${safeAddress}${path}`;
 };
 
 export const WS_URL = makeWsUrl();
