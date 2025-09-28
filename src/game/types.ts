@@ -43,12 +43,15 @@ export interface PlayerSnapshot {
 }
 
 export type ServerMessage =
-  | { type: 'init'; id: string; players: PlayerSnapshot[] }
+  | { type: 'init'; id: string; roomId: string; players: PlayerSnapshot[] }
   | { type: 'player-update'; player: PlayerSnapshot }
   | { type: 'player-leave'; id: string }
   | { type: 'pong'; timestamp: number };
 
-export type ClientMessage = { type: 'state'; player: PlayerSnapshot } | { type: 'ping'; timestamp: number };
+export type ClientMessage =
+  | { type: 'join'; room: string }
+  | { type: 'state'; player: PlayerSnapshot }
+  | { type: 'ping'; timestamp: number };
 
 export interface MultiplayerOptions {
   url: string;
