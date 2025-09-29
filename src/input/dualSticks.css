@@ -1,0 +1,260 @@
+.dual-sticks {
+  --stick-radius: 68px;
+  --stick-safe-margin: 16px;
+  --stick-hit-scale: 3.25;
+  --stick-buttons-margin: 24px;
+  --stick-hit-diameter: calc(var(--stick-radius) * var(--stick-hit-scale));
+  --stick-hit-radius: calc(var(--stick-hit-diameter) * 0.5);
+  position: fixed;
+  inset: 0;
+  z-index: 32;
+  pointer-events: none;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.dual-sticks.hidden {
+  display: none;
+}
+
+.dual-sticks .dual-stick {
+  position: absolute;
+  width: var(--stick-hit-diameter);
+  height: var(--stick-hit-diameter);
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.dual-sticks.disabled .dual-stick,
+.dual-sticks.disabled .touch-actions {
+  pointer-events: none;
+}
+
+.dual-sticks.disabled .dual-stick__base,
+.dual-sticks.disabled .touch-action {
+  opacity: 0.5;
+}
+
+.dual-stick--left {
+  left: calc(
+    env(safe-area-inset-left) + var(--stick-safe-margin) + var(--stick-radius)
+  );
+  bottom: calc(
+    env(safe-area-inset-bottom) + var(--stick-safe-margin) + var(--stick-radius) -
+      var(--stick-hit-diameter)
+  );
+  transform: translate(-50%, -50%);
+}
+
+.dual-stick--right {
+  right: calc(
+    env(safe-area-inset-right) + var(--stick-safe-margin) + var(--stick-radius)
+  );
+  bottom: calc(
+    env(safe-area-inset-bottom) + var(--stick-safe-margin) + var(--stick-radius) -
+      var(--stick-hit-diameter)
+  );
+  transform: translate(50%, -50%);
+}
+
+.dual-sticks--lefty .dual-stick--left {
+  left: auto;
+  right: calc(
+    env(safe-area-inset-right) + var(--stick-safe-margin) + var(--stick-radius)
+  );
+  transform: translate(50%, -50%);
+}
+
+.dual-sticks--lefty .dual-stick--right {
+  right: auto;
+  left: calc(
+    env(safe-area-inset-left) + var(--stick-safe-margin) + var(--stick-radius)
+  );
+  transform: translate(-50%, -50%);
+}
+
+.dual-stick__base {
+  position: absolute;
+  inset: 50% 0 auto 50%;
+  width: calc(var(--stick-radius) * 2);
+  height: calc(var(--stick-radius) * 2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  transition: opacity 0.18s ease;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.dual-stick--active .dual-stick__base {
+  opacity: 0.95;
+}
+
+.dual-stick__knob {
+  width: calc(var(--stick-radius) * 1.18);
+  height: calc(var(--stick-radius) * 1.18);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.06s ease;
+}
+
+.dual-stick--active .dual-stick__knob {
+  transition: none;
+}
+
+.touch-actions {
+  position: absolute;
+  bottom: calc(
+    env(safe-area-inset-bottom) + var(--stick-safe-margin) + var(--stick-radius) +
+      var(--stick-buttons-margin)
+  );
+  right: calc(env(safe-area-inset-right) + var(--stick-safe-margin));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+.dual-sticks--lefty .touch-actions {
+  right: auto;
+  left: calc(env(safe-area-inset-left) + var(--stick-safe-margin));
+  align-items: flex-start;
+}
+
+@media (orientation: landscape) {
+  .touch-actions {
+    flex-direction: row;
+    bottom: calc(
+      env(safe-area-inset-bottom) + var(--stick-safe-margin) +
+        var(--stick-radius) + var(--stick-buttons-margin)
+    );
+    right: calc(
+      env(safe-area-inset-right) + var(--stick-safe-margin) +
+        var(--stick-radius)
+    );
+  }
+
+  .dual-sticks--lefty .touch-actions {
+    right: auto;
+    left: calc(
+      env(safe-area-inset-left) + var(--stick-safe-margin) + var(--stick-radius)
+    );
+  }
+}
+
+.touch-actions .touch-action {
+  min-width: 84px;
+  min-height: 84px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+}
+
+.touch-actions .touch-action.active,
+.touch-actions .touch-action:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.stick-hud {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 12px);
+  left: calc(env(safe-area-inset-left) + 16px);
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #e8f5ff;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 40;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.stick-hud__row {
+  display: flex;
+  gap: 16px;
+}
+
+.stick-hud__column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dual-sticks__swap {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 16px);
+  right: calc(env(safe-area-inset-right) + 16px);
+  padding: 8px 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.dual-sticks__swap:active {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.dual-sticks--lefty .dual-sticks__swap {
+  right: auto;
+  left: calc(env(safe-area-inset-left) + 16px);
+}
+
+.dual-sticks__utilities {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 64px);
+  right: calc(env(safe-area-inset-right) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.dual-sticks__utilities--left {
+  right: auto;
+  left: calc(env(safe-area-inset-left) + 16px);
+}
+
+.dual-sticks__utility {
+  min-width: 70px;
+  min-height: 34px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.dual-sticks__utility:active {
+  background: rgba(0, 0, 0, 0.7);
+}

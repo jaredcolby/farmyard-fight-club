@@ -1,18 +1,28 @@
-import * as THREE from 'three';
-import { GUI } from 'dat.gui';
-import Stats from 'stats.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from "three";
+import { GUI } from "dat.gui";
+import Stats from "stats.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-import type { ControlMode, ModelDefinition, PlayerSnapshot } from './types';
-import { Character, Player, RemotePlayer } from './Character';
-import { InputManager } from '../input/InputManager';
-import type { InputState } from '../input/types';
-import { SceneryManager } from './Scenery';
-import { AudioManager } from './audio';
-import { MultiplayerClient } from './MultiplayerClient';
+import type { ControlMode, ModelDefinition, PlayerSnapshot } from "./types";
+import { Character, Player, RemotePlayer } from "./Character";
+import { InputManager } from "../input/InputManager";
+import type { InputState } from "../input/types";
+import { SceneryManager } from "./Scenery";
+import { AudioManager } from "./audio";
+import { MultiplayerClient } from "./MultiplayerClient";
+import { CameraRig } from "./camera/CameraRig";
+import { MobileDualSticks } from "./controls/MobileDualSticks";
+import {
+  Controls,
+  getCameraMode,
+  initControls,
+  setCameraMode,
+  shouldShowJoysticks,
+} from "../settings/controls";
 
-const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+const LOOK_EPSILON = 1e-4;
 
 export interface GameControls {
   spotlightColour: string;
@@ -24,18 +34,18 @@ export interface GameControls {
 
 export class Game {
   public readonly controls: GameControls = {
-    spotlightColour: '#FFFFFF',
+    spotlightColour: "#FFFFFF",
     debug: false,
-    playerState: '',
+    playerState: "",
     walkSpeed: 0.3,
-    cameraPOV: 'world'
+    cameraPOV: "world",
   };
 
   private readonly gui = new GUI();
   private readonly scene = new THREE.Scene();
   private readonly renderer = new THREE.WebGLRenderer();
   private readonly camera: THREE.PerspectiveCamera;
-  private readonly cameraControls: OrbitControls;
+  private readonly cameraRig: CameraRig;
   private readonly spotlight = new THREE.SpotLight(0xffffff);
   private readonly ambient = new THREE.AmbientLight(0xeeeeee);
   private readonly stats = new Stats();
@@ -49,6 +59,9 @@ export class Game {
   private inputs!: InputManager;
   private scenery!: SceneryManager;
   private audio!: AudioManager;
+  private mobileSticks: MobileDualSticks | null = null;
+  private readonly debugMobile =
+    new URLSearchParams(window.location.search).get("debug") === "1";
 
   private models: Map<string, ModelDefinition> = new Map();
   private multiplayer?: MultiplayerClient;
@@ -57,19 +70,29 @@ export class Game {
   private guiVisible = false;
   private walkAudioPlaying = false;
   private jumpHeld = false;
+  private timeSinceCamInput = Number.POSITIVE_INFINITY;
   private readonly tempForward = new THREE.Vector3();
   private readonly tempRight = new THREE.Vector3();
+  private readonly tempMove = new THREE.Vector3();
   private readonly up = new THREE.Vector3(0, 1, 0);
 
-  constructor(private readonly outputSelector = '#output', private readonly statsSelector = '#stats') {
-    this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 1, 2000);
-    this.cameraControls = new OrbitControls(this.camera, this.renderer.domElement);
+  constructor(
+    private readonly outputSelector = "#output",
+    private readonly statsSelector = "#stats"
+  ) {
+    this.camera = new THREE.PerspectiveCamera(
+      60,
+      this.width / this.height,
+      1,
+      2000
+    );
+    this.cameraRig = new CameraRig(this.camera);
 
     this.handleResize = this.handleResize.bind(this);
-    this.handleDblClick = this.handleDblClick.bind(this);
   }
 
   async start(): Promise<void> {
+    initControls();
     this.setupGui();
     this.setupRenderer();
     this.setupLighting();
@@ -77,7 +100,12 @@ export class Game {
     this.setupSkybox();
     this.setupStats();
 
+    this.cameraRig.attachTo(this.scene);
+    this.cameraRig.setMode(getCameraMode());
+
     await this.initCharacters();
+    this.cameraRig.setFollowTarget(this.player.object);
+    this.cameraRig.setYaw(this.player.object.rotation.y);
 
     this.scenery = new SceneryManager(this.scene);
     await this.scenery.load();
@@ -88,10 +116,16 @@ export class Game {
     this.inputs = new InputManager(this.toggleCamera, this.toggleGuiVisibility);
     this.inputs.register();
     this.setGuiVisibility(false);
-    this.inputs.attachToGui(this.gui);
 
-    window.addEventListener('resize', this.handleResize);
-    window.addEventListener('dblclick', this.handleDblClick);
+    if (shouldShowJoysticks()) {
+      this.mobileSticks = new MobileDualSticks({
+        debug: this.debugMobile,
+        onToggleCamera: this.toggleCamera,
+        onToggleMenu: this.toggleGuiVisibility,
+      });
+    }
+
+    window.addEventListener("resize", this.handleResize);
 
     this.multiplayer = new MultiplayerClient(this);
     this.multiplayer.connect();
@@ -100,12 +134,12 @@ export class Game {
   }
 
   dispose(): void {
-    window.removeEventListener('resize', this.handleResize);
-    window.removeEventListener('dblclick', this.handleDblClick);
+    window.removeEventListener("resize", this.handleResize);
     this.inputs?.dispose();
     this.multiplayer?.dispose();
     this.clearRemotePlayers();
     this.gui.destroy();
+    this.mobileSticks?.dispose();
   }
 
   get sceneRef(): THREE.Scene {
@@ -132,10 +166,6 @@ export class Game {
     return this.camera;
   }
 
-  getCameraControls(): OrbitControls {
-    return this.cameraControls;
-  }
-
   getRenderer(): THREE.WebGLRenderer {
     return this.renderer;
   }
@@ -149,19 +179,19 @@ export class Game {
   }
 
   private setupGui(): void {
-    this.gui.domElement.classList.add('gui-overlay');
-    this.gui.addColor(this.controls, 'spotlightColour').onChange(value => {
+    this.gui.domElement.classList.add("gui-overlay");
+    this.gui.addColor(this.controls, "spotlightColour").onChange((value) => {
       this.spotlight.color.setStyle(value);
     });
 
-    this.gui.add(this.controls, 'debug').onChange(value => {
-      Character.each(character => {
+    this.gui.add(this.controls, "debug").onChange((value) => {
+      Character.each((character) => {
         character.setDebugVisible(value);
       });
     });
 
-    this.gui.add(this.controls, 'walkSpeed', 0, 1);
-    this.gui.add(this.controls, 'playerState').listen();
+    this.gui.add(this.controls, "walkSpeed", 0, 1);
+    this.gui.add(this.controls, "playerState").listen();
   }
 
   private setupRenderer(): void {
@@ -186,13 +216,15 @@ export class Game {
 
   private setupLand(): void {
     const loader = new THREE.TextureLoader();
-    this.landTexture = loader.load('/assets/textures/grasslight-big.jpg');
+    this.landTexture = loader.load("/assets/textures/grasslight-big.jpg");
     this.landTexture.wrapS = this.landTexture.wrapT = THREE.RepeatWrapping;
     this.landTexture.repeat.set(50, 50);
     this.landTexture.anisotropy = 16;
 
     const landGeometry = new THREE.PlaneGeometry(1000, 1000);
-    const landMaterial = new THREE.MeshLambertMaterial({ map: this.landTexture });
+    const landMaterial = new THREE.MeshLambertMaterial({
+      map: this.landTexture,
+    });
 
     const land = new THREE.Mesh(landGeometry, landMaterial);
     land.rotation.x = -0.5 * Math.PI;
@@ -203,12 +235,12 @@ export class Game {
   private setupSkybox(): void {
     const loader = new THREE.CubeTextureLoader();
     const texture = loader.load([
-      '/assets/backgrounds/sky/xpos.png',
-      '/assets/backgrounds/sky/xneg.png',
-      '/assets/backgrounds/sky/ypos.png',
-      '/assets/backgrounds/sky/yneg.png',
-      '/assets/backgrounds/sky/zpos.png',
-      '/assets/backgrounds/sky/zneg.png'
+      "/assets/backgrounds/sky/xpos.png",
+      "/assets/backgrounds/sky/xneg.png",
+      "/assets/backgrounds/sky/ypos.png",
+      "/assets/backgrounds/sky/yneg.png",
+      "/assets/backgrounds/sky/zpos.png",
+      "/assets/backgrounds/sky/zneg.png",
     ]);
 
     this.scene.background = texture;
@@ -228,17 +260,17 @@ export class Game {
     const definitions = this.buildModelDefinitions();
 
     await Promise.all(
-      definitions.map(async definition => {
+      definitions.map(async (definition) => {
         const gltf = await loader.loadAsync(definition.url);
         definition.name = definition.name || definition.url;
         definition.gltf = gltf;
         definition.animations = {};
 
-        gltf.animations.forEach(clip => {
+        gltf.animations.forEach((clip) => {
           const clipName = clip.name.toLowerCase();
           const processed = clip.clone();
 
-          if (clipName === 'walk' || clipName === 'walkslow') {
+          if (clipName === "walk" || clipName === "walkslow") {
             processed.duration /= 2;
           }
 
@@ -250,12 +282,14 @@ export class Game {
       })
     );
 
-    const playerModel = this.models.get('cow');
+    const playerModel = this.models.get("cow");
     if (!playerModel) {
-      throw new Error('Player model not loaded');
+      throw new Error("Player model not loaded");
     }
 
-    this.player = new Player(this, 'player', playerModel, { position: new THREE.Vector3(0, 0, 0) });
+    this.player = new Player(this, "player", playerModel, {
+      position: new THREE.Vector3(0, 0, 0),
+    });
 
     const modelNames = Array.from(this.models.keys());
     for (let i = 0; i < 20; i += 1) {
@@ -277,22 +311,30 @@ export class Game {
 
   private buildModelDefinitions(): ModelDefinition[] {
     const definitions: ModelDefinition[] = [
-      { name: 'cow', url: '/assets/models/characters/Cow.gltf' },
-      { name: 'pug', url: '/assets/models/characters/Pug.gltf' },
-      { name: 'llama', url: '/assets/models/characters/Llama.gltf' },
-      { name: 'zebra', url: '/assets/models/characters/Zebra.gltf' },
-      { name: 'horse', url: '/assets/models/characters/Horse.gltf' },
-      { name: 'pig', url: '/assets/models/characters/Pig.gltf' },
-      { name: 'sheep', url: '/assets/models/characters/Sheep.gltf' },
       {
-        name: 'skeleton',
-        url: '/assets/models/characters/Skeleton.gltf',
-        process: gltf => {
-          gltf.scene.traverse(child => {
+        name: "cow",
+        url: "/assets/models/characters/Cow.gltf",
+        process: (gltf) => {
+          gltf.scene.rotateY(Math.PI);
+        },
+      },
+      { name: "pug", url: "/assets/models/characters/Pug.gltf" },
+      { name: "llama", url: "/assets/models/characters/Llama.gltf" },
+      { name: "zebra", url: "/assets/models/characters/Zebra.gltf" },
+      { name: "horse", url: "/assets/models/characters/Horse.gltf" },
+      { name: "pig", url: "/assets/models/characters/Pig.gltf" },
+      { name: "sheep", url: "/assets/models/characters/Sheep.gltf" },
+      {
+        name: "skeleton",
+        url: "/assets/models/characters/Skeleton.gltf",
+        process: (gltf) => {
+          gltf.scene.traverse((child) => {
             if ((child as THREE.Mesh).isMesh) {
               const mesh = child as THREE.Mesh;
-              const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-              const updated = materials.map(material => {
+              const materials = Array.isArray(mesh.material)
+                ? mesh.material
+                : [mesh.material];
+              const updated = materials.map((material) => {
                 if (material instanceof THREE.MeshStandardMaterial) {
                   const clone = material.clone();
                   clone.metalness = 0;
@@ -302,11 +344,13 @@ export class Game {
                 return material;
               });
 
-              mesh.material = Array.isArray(mesh.material) ? updated : updated[0];
+              mesh.material = Array.isArray(mesh.material)
+                ? updated
+                : updated[0];
             }
           });
-        }
-      }
+        },
+      },
     ];
 
     return definitions;
@@ -319,10 +363,14 @@ export class Game {
   buildSnapshot(id: string): PlayerSnapshot {
     const position = this.player.object.position;
     const rotation = this.player.object.rotation;
-    const currentState = this.player.getCurrentState() || this.player.getActiveAnimation()?.name || 'idle';
+    const currentState =
+      this.player.getCurrentState() ||
+      this.player.getActiveAnimation()?.name ||
+      "idle";
     const active = this.player.getActiveAnimation();
     const timeScale = active?.timeScale ?? 1;
-    const walkSpeedFactor = this.walkSpeed === 0 ? 0 : this.player.getSpeed() / this.walkSpeed;
+    const walkSpeedFactor =
+      this.walkSpeed === 0 ? 0 : this.player.getSpeed() / this.walkSpeed;
 
     return {
       id,
@@ -332,7 +380,7 @@ export class Game {
       timeScale,
       walkSpeed: walkSpeedFactor,
       model: this.player.modelName,
-      timestamp: performance.now()
+      timestamp: performance.now(),
     };
   }
 
@@ -341,7 +389,7 @@ export class Game {
       return;
     }
 
-    const model = this.models.get(snapshot.model) || this.models.get('cow');
+    const model = this.models.get(snapshot.model) || this.models.get("cow");
     if (!model) {
       return;
     }
@@ -349,7 +397,7 @@ export class Game {
     let remote = this.remotePlayers.get(snapshot.id);
     if (!remote) {
       remote = new RemotePlayer(this, `remote-${snapshot.id}`, model, {
-        position: new THREE.Vector3(...snapshot.position)
+        position: new THREE.Vector3(...snapshot.position),
       });
       this.remotePlayers.set(snapshot.id, remote);
     }
@@ -368,26 +416,70 @@ export class Game {
   }
 
   clearRemotePlayers(): void {
-    this.remotePlayers.forEach(remote => remote.destroy());
+    this.remotePlayers.forEach((remote) => remote.destroy());
     this.remotePlayers.clear();
   }
 
   private animate = (now: number): void => {
     const seconds = now * 0.001;
-    const deltaTime = seconds - this.lastAnimateTime;
+    const rawDelta = seconds - this.lastAnimateTime;
     this.lastAnimateTime = seconds;
+    const deltaTime = Math.min(Math.max(rawDelta, 0), 0.1);
 
     const input = this.inputs.read();
-    this.applyInput(input);
 
-    if (this.controls.cameraPOV === 'player') {
-      const charPos = this.player.object.position.clone();
-      charPos.add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(charPos);
+    let mobileMagnitude = 0;
+    let mobileCameraInput = false;
+    if (this.mobileSticks) {
+      this.mobileSticks.update(deltaTime);
+      const mobileActions = this.mobileSticks.getActions();
+      input.actions.primary = input.actions.primary || mobileActions.primary;
+      input.actions.secondary =
+        input.actions.secondary || mobileActions.secondary;
+      input.actions.jump = input.actions.jump || mobileActions.jump;
+      mobileMagnitude = this.mobileSticks.applyMovement(input);
+      mobileCameraInput =
+        this.mobileSticks.applyCamera(input, this.cameraRig, deltaTime) ||
+        mobileCameraInput;
     }
 
+    const desktopCameraInput = this.applyInput(
+      input,
+      deltaTime,
+      mobileMagnitude
+    );
+    const hasCameraInput = mobileCameraInput || desktopCameraInput;
+
+    if (hasCameraInput) {
+      this.timeSinceCamInput = 0;
+    } else {
+      this.timeSinceCamInput += deltaTime;
+    }
+
+    const movementDeadZone = Controls.deadZone ?? 0.12;
+    const inputMoveMagnitude = Math.hypot(input.move.x, input.move.y);
+    const hasDesktopMoveIntent = inputMoveMagnitude > movementDeadZone;
+    const hasMobileMoveIntent = mobileMagnitude > movementDeadZone;
+    const hasVelocity = this.player ? this.player.getSpeed() > 0.05 : false;
+    const isMoving = hasVelocity || hasDesktopMoveIntent || hasMobileMoveIntent;
+    const desiredForwardYaw = this.player
+      ? this.player.object.rotation.y
+      : this.cameraRig.getYaw();
+
+    this.cameraRig.tick(deltaTime, {
+      hasCamInput: hasCameraInput,
+      isMoving,
+      desiredForwardYaw,
+      timeSinceCamInput: this.timeSinceCamInput,
+    });
+    this.mobileSticks?.afterCameraUpdate(
+      this.player,
+      this.cameraRig,
+      deltaTime
+    );
+
     this.player.update(deltaTime);
-    Character.each(character => {
+    Character.each((character) => {
       if (character !== this.player) {
         character.update(deltaTime);
       }
@@ -400,108 +492,140 @@ export class Game {
     requestAnimationFrame(this.animate);
   };
 
-  private applyInput(input: InputState): void {
+  private applyInput(
+    input: InputState,
+    _deltaTime: number,
+    mobileMagnitude: number
+  ): boolean {
     if (!this.player) {
-      return;
+      return false;
     }
 
-    if (input.lookDelta.x !== 0) {
-      this.player.object.rotateY(-input.lookDelta.x);
+    let usedCameraInput = false;
+
+    const mouseYawDelta = -input.lookDelta.x;
+    const yawDelta = input.turn + mouseYawDelta;
+    if (Math.abs(yawDelta) > LOOK_EPSILON) {
+      const currentYaw = this.player.object.rotation.y;
+      const nextYaw =
+        THREE.MathUtils.euclideanModulo(currentYaw + yawDelta + Math.PI, Math.PI * 2) -
+        Math.PI;
+      this.player.object.rotation.y = nextYaw;
+      this.cameraRig.addYaw(yawDelta);
+      usedCameraInput = true;
     }
 
-    if (Math.abs(input.move.x) > 0.05) {
-      this.applyStrafe(input.move.x);
+    if (Math.abs(input.lookDelta.y) > LOOK_EPSILON) {
+      this.cameraRig.addPitch(input.lookDelta.y);
+      usedCameraInput = true;
     }
 
     if (input.actions.jump && !this.jumpHeld) {
       this.jumpHeld = true;
-      this.audio.setPlaybackRate('walk', 0.5);
-      this.audio.play('walk');
-      this.player.changeState('jump', { force: true });
+      this.handleWalkAudio(0.5);
+      this.player.changeState("jump", { force: true });
     } else if (!input.actions.jump && this.jumpHeld) {
       this.jumpHeld = false;
-      this.audio.stop('walk');
-      this.walkAudioPlaying = false;
+      this.stopWalkAudio();
     }
 
     if (this.jumpHeld) {
-      return;
+      this.player.clearVelocity();
+      return usedCameraInput;
     }
 
-    const forward = clamp(input.move.y, -1, 1);
-    const moving = Math.abs(forward) > 0.05;
+    this.player.clearVelocity();
 
-    if (moving) {
-      const magnitude = Math.abs(forward);
-      const direction = Math.sign(forward) || 1;
-      const timeScale = direction * Math.max(0.5, magnitude);
-      this.player.changeState('walk', { walkSpeed: forward, timeScale, force: true });
-      this.audio.setPlaybackRate('walk', Math.abs(timeScale));
-      if (!this.walkAudioPlaying) {
-        this.audio.play('walk');
-        this.walkAudioPlaying = true;
+    const movementDeadZone = Controls.deadZone ?? 0.12;
+    const moveMagnitude = Math.hypot(input.move.x, input.move.y);
+    const hasMoveInput = moveMagnitude > movementDeadZone;
+
+    if (hasMoveInput) {
+      const yaw = this.player.object.rotation.y;
+      const sinYaw = Math.sin(yaw);
+      const cosYaw = Math.cos(yaw);
+      this.tempForward.set(-sinYaw, 0, -cosYaw).normalize();
+      this.tempRight.copy(this.tempForward).cross(this.up).normalize();
+
+      this.tempMove
+        .copy(this.tempForward)
+        .multiplyScalar(input.move.y)
+        .addScaledVector(this.tempRight, input.move.x);
+
+      if (this.tempMove.lengthSq() > 1e-6) {
+        this.tempMove.normalize();
+        const intensity = clamp(moveMagnitude, 0, 1);
+        const displacement = this.walkSpeed * intensity;
+        this.tempMove.multiplyScalar(displacement);
+        this.player.setVelocity(this.tempMove);
       }
+
+      const forwardComponent = clamp(input.move.y, -1, 1);
+      const directionSign = forwardComponent < -0.05 ? -1 : 1;
+      const speedIntensity = clamp(moveMagnitude, 0, 1);
+      const timeScale = directionSign * Math.max(0.5, speedIntensity);
+      this.player.changeState("walk", {
+        walkSpeed: speedIntensity,
+        timeScale,
+        force: true,
+      });
+      this.handleWalkAudio(Math.abs(timeScale));
     } else {
-      if (this.player.getCurrentState() !== 'idle') {
-        this.player.changeState('idle');
+      this.stopWalkAudio();
+      if (this.player.getCurrentState() !== "idle") {
+        this.player.changeState("idle");
       }
-      if (this.walkAudioPlaying) {
-        this.audio.stop('walk');
-        this.walkAudioPlaying = false;
-      }
+    }
+
+    return usedCameraInput;
+  }
+
+  private handleWalkAudio(rate: number): void {
+    this.audio.setPlaybackRate("walk", rate);
+    if (!this.walkAudioPlaying) {
+      this.audio.play("walk");
+      this.walkAudioPlaying = true;
     }
   }
 
-  private applyStrafe(amount: number): void {
-    const clamped = clamp(amount, -1, 1);
-    if (Math.abs(clamped) < 0.05) {
+  private stopWalkAudio(): void {
+    if (!this.walkAudioPlaying) {
       return;
     }
-
-    this.player.object.getWorldDirection(this.tempForward);
-    this.tempRight.copy(this.tempForward).cross(this.up).normalize();
-    this.player.object.position.addScaledVector(this.tempRight, clamped * this.walkSpeed);
+    this.audio.stop("walk");
+    this.walkAudioPlaying = false;
   }
 
   private toggleCamera = (): void => {
-    if (!this.player) {
-      return;
-    }
-
-    const playerObject = this.player.object;
-    if (this.controls.cameraPOV === 'world') {
-      this.controls.cameraPOV = 'player';
-      this.cameraControls.saveState();
-      playerObject.add(this.camera);
-      this.camera.position.set(0, 10, -20);
-      const lookAtTarget = playerObject.position.clone().add(new THREE.Vector3(0, 10, 0));
-      this.camera.lookAt(lookAtTarget);
-    } else {
-      this.controls.cameraPOV = 'world';
-      playerObject.remove(this.camera);
-      this.cameraControls.reset();
-    }
+    const current = getCameraMode();
+    const next = current === "chase" ? "fpv" : "chase";
+    setCameraMode(next);
+    this.cameraRig.setMode(next);
+    this.controls.cameraPOV = next === "chase" ? "world" : "player";
   };
 
   private setGuiVisibility(visible: boolean): void {
     this.guiVisible = visible;
-    const guiWithVisibility = this.gui as GUI & { hide?: () => void; show?: () => void };
+    const guiWithVisibility = this.gui as GUI & {
+      hide?: () => void;
+      show?: () => void;
+    };
     if (visible) {
       if (guiWithVisibility.show) {
         guiWithVisibility.show();
       } else {
-        this.gui.domElement.style.display = '';
+        this.gui.domElement.style.display = "";
       }
-      this.gui.domElement.classList.add('gui-visible');
-      this.inputs.setMobileInteractivity(false);
+      this.gui.domElement.classList.add("gui-visible");
+      this.mobileSticks?.setInteractive(false);
     } else if (guiWithVisibility.hide) {
       guiWithVisibility.hide();
-      this.gui.domElement.classList.remove('gui-visible');
-      this.inputs.setMobileInteractivity(true);
+      this.gui.domElement.classList.remove("gui-visible");
+      this.mobileSticks?.setInteractive(true);
     } else {
-      this.gui.domElement.style.display = 'none';
-      this.gui.domElement.classList.remove('gui-visible');
-      this.inputs.setMobileInteractivity(true);
+      this.gui.domElement.style.display = "none";
+      this.gui.domElement.classList.remove("gui-visible");
+      this.mobileSticks?.setInteractive(true);
     }
   }
 
@@ -515,23 +639,5 @@ export class Game {
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.width, this.height);
-  }
-
-  private handleDblClick(event: MouseEvent): void {
-    const mousePos = new THREE.Vector2();
-    const raycaster = new THREE.Raycaster();
-
-    mousePos.x = (event.clientX / this.width) * 2 - 1;
-    mousePos.y = (event.clientY / this.height) * 2 - 1;
-
-    raycaster.setFromCamera(mousePos, this.camera);
-
-    const intersects = raycaster.intersectObjects(this.scene.children, false);
-
-    if (intersects.length > 0) {
-      const first = intersects[0];
-      this.cameraControls.target.copy(first.point);
-      this.cameraControls.update();
-    }
   }
 }

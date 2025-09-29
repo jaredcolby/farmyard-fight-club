@@ -59,6 +59,7 @@ export class MotionController {
     result.move = { ...base.move };
     result.lookDelta = { ...base.lookDelta };
     result.actions = { ...base.actions };
+    result.turn = base.turn;
 
     const tilt = this.computeTilt();
 
