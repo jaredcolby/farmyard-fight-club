@@ -10,6 +10,7 @@ export interface InputState {
   move: Vec2;
   lookDelta: Vec2;
   actions: InputActions;
+  turn: number;
 }
 
 export const emptyVec2 = (): Vec2 => ({ x: 0, y: 0 });
@@ -17,7 +18,8 @@ export const emptyVec2 = (): Vec2 => ({ x: 0, y: 0 });
 export const createEmptyInputState = (): InputState => ({
   move: emptyVec2(),
   lookDelta: emptyVec2(),
-  actions: { primary: false, secondary: false, jump: false }
+  actions: { primary: false, secondary: false, jump: false },
+  turn: 0
 });
 
 export const mergeInputStates = (target: InputState, source: InputState): InputState => {
@@ -28,6 +30,7 @@ export const mergeInputStates = (target: InputState, source: InputState): InputS
   target.actions.primary = target.actions.primary || source.actions.primary;
   target.actions.secondary = target.actions.secondary || source.actions.secondary;
   target.actions.jump = target.actions.jump || source.actions.jump;
+  target.turn += source.turn;
   return target;
 };
 

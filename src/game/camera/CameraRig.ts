@@ -1,16 +1,23 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
-import type { CameraMode } from '../../settings/controls';
-import { getCameraTuning, type CameraTuning } from '../../settings/controls';
-
-const PI2 = Math.PI * 2;
+import type { CameraMode } from "../../settings/controls";
+import { getCameraTuning, type CameraTuning } from "../../settings/controls";
+import { expBlend, normaliseAngle, shortestAngleDiff } from "../../utils/math";
 const EPSILON = 1e-5;
-const DEFAULT_CHASE_PITCH = degToRad(-15);
+const DEFAULT_CHASE_PITCH = degToRad(0);
 
 interface CameraTickContext {
   hasCamInput?: boolean;
   isMoving?: boolean;
   desiredForwardYaw?: number;
+  timeSinceCamInput?: number;
+}
+
+interface TpsPolicyContext {
+  hasCamInput: boolean;
+  isMoving: boolean;
+  desiredForwardYaw: number;
+  timeSinceCamInput: number;
 }
 
 interface CollisionConfig {
@@ -35,15 +42,19 @@ class CameraCollision {
   }
 
   configure(config: Partial<CollisionConfig>): void {
-    if (typeof config.radius === 'number') {
+    if (typeof config.radius === "number") {
       this.radius = Math.max(0, config.radius);
     }
-    if (typeof config.minDistance === 'number') {
+    if (typeof config.minDistance === "number") {
       this.minDistance = Math.max(0, config.minDistance);
     }
   }
 
-  probe(origin: THREE.Vector3, target: THREE.Vector3, ignore: Set<THREE.Object3D>): number {
+  probe(
+    origin: THREE.Vector3,
+    target: THREE.Vector3,
+    ignore: Set<THREE.Object3D>
+  ): number {
     if (!this.scene) {
       return Math.max(origin.distanceTo(target), this.minDistance);
     }
@@ -93,7 +104,7 @@ export class CameraRig {
   private readonly camera: THREE.PerspectiveCamera;
 
   private readonly tuning: CameraTuning;
-  private mode: CameraMode = 'chase';
+  private mode: CameraMode = "chase";
   private followTarget: THREE.Object3D | null = null;
   private scene: THREE.Scene | null = null;
 
@@ -112,8 +123,8 @@ export class CameraRig {
 
   private readonly tpsShoulderOffset = new THREE.Vector3();
   private readonly currentShoulderOffset = new THREE.Vector3();
-  private armLengthTarget = 4.5;
-  private armLengthCurrent = 4.5;
+  private armLengthTarget = 15;
+  private armLengthCurrent = 15;
 
   private characterHeight = 1.8;
   private eyeHeight = 1.65;
@@ -122,7 +133,6 @@ export class CameraRig {
   private readonly collisionIgnore = new Set<THREE.Object3D>();
 
   private hadInputThisFrame = false;
-  private autoRecentreTimer = 0;
   private lastDesiredForwardYaw = 0;
 
   private readonly tempVecA = new THREE.Vector3();
@@ -131,14 +141,17 @@ export class CameraRig {
   private readonly tempBox = new THREE.Box3();
   private readonly tempSize = new THREE.Vector3();
 
-  constructor(camera: THREE.PerspectiveCamera, tuning: CameraTuning = getCameraTuning()) {
+  constructor(
+    camera: THREE.PerspectiveCamera,
+    tuning: CameraTuning = getCameraTuning()
+  ) {
     this.camera = camera;
     this.tuning = tuning;
 
-    this.root.name = 'CameraRigRoot';
-    this.yawNode.name = 'CameraRigYaw';
-    this.shoulderNode.name = 'CameraRigShoulder';
-    this.pitchNode.name = 'CameraRigPitch';
+    this.root.name = "CameraRigRoot";
+    this.yawNode.name = "CameraRigYaw";
+    this.shoulderNode.name = "CameraRigShoulder";
+    this.pitchNode.name = "CameraRigPitch";
 
     this.pivotOffset.set(0, tuning.tps.pivotOffsetY, 0);
     this.tpsShoulderOffset.set(
@@ -155,7 +168,7 @@ export class CameraRig {
 
     this.collision.configure({
       radius: tuning.tps.collisionRadius,
-      minDistance: tuning.tps.collisionMinDistance
+      minDistance: tuning.tps.minArmLength,
     });
 
     this.root.add(this.yawNode);
@@ -164,7 +177,7 @@ export class CameraRig {
     this.pitchNode.add(this.camera);
 
     this.updateCharacterMetrics();
-    this.applyModeSettings('chase');
+    this.applyModeSettings("chase");
     this.updateCollisionIgnore();
     this.lastDesiredForwardYaw = this.yawTarget;
   }
@@ -207,16 +220,16 @@ export class CameraRig {
 
   configureCollision(config: Partial<CollisionConfig>): void {
     this.collision.configure(config);
-    if (typeof config.radius === 'number') {
+    if (typeof config.radius === "number") {
       this.tuning.tps.collisionRadius = config.radius;
     }
-    if (typeof config.minDistance === 'number') {
-      this.tuning.tps.collisionMinDistance = config.minDistance;
+    if (typeof config.minDistance === "number") {
+      this.tuning.tps.minArmLength = config.minDistance;
     }
   }
 
   setFov(value: number): void {
-    if (this.mode === 'chase') {
+    if (this.mode === "chase") {
       this.tuning.tps.fov = value;
     } else {
       this.tuning.fpv.fov = value;
@@ -229,9 +242,9 @@ export class CameraRig {
   }
 
   setArmLength(length: number): void {
-    const clamped = Math.max(length, this.tuning.tps.collisionMinDistance);
+    const clamped = Math.max(length, this.tuning.tps.minArmLength);
     this.tuning.tps.armLength = clamped;
-    if (this.mode === 'chase') {
+    if (this.mode === "chase") {
       this.armLengthTarget = clamped;
       this.armLengthCurrent = clamped;
     }
@@ -241,12 +254,14 @@ export class CameraRig {
     return this.tuning.tps.armLength;
   }
 
-  setShoulderOffset(offset: THREE.Vector3 | { x: number; y: number; z: number }): void {
+  setShoulderOffset(
+    offset: THREE.Vector3 | { x: number; y: number; z: number }
+  ): void {
     this.tpsShoulderOffset.set(offset.x, offset.y, offset.z);
     this.tuning.tps.shoulderOffset.x = this.tpsShoulderOffset.x;
     this.tuning.tps.shoulderOffset.y = this.tpsShoulderOffset.y;
     this.tuning.tps.shoulderOffset.z = this.tpsShoulderOffset.z;
-    if (this.mode === 'chase') {
+    if (this.mode === "chase") {
       this.currentShoulderOffset.copy(this.tpsShoulderOffset);
     }
   }
@@ -291,7 +306,11 @@ export class CameraRig {
     this.hadInputThisFrame = true;
   }
 
-  alignYawToObject(object: THREE.Object3D, gain: number, deltaTime: number): void {
+  alignYawToObject(
+    object: THREE.Object3D,
+    gain: number,
+    deltaTime: number
+  ): void {
     const targetYaw = this.extractYaw(object);
     this.alignYawTo(targetYaw, gain, deltaTime);
   }
@@ -302,7 +321,7 @@ export class CameraRig {
       this.yawTarget = normaliseAngle(angle);
       return;
     }
-    const step = delta * (1 - Math.exp(-gain * deltaTime));
+    const step = expBlend(0, delta, gain, deltaTime);
     this.yawTarget = normaliseAngle(this.yawTarget + step);
   }
 
@@ -314,56 +333,46 @@ export class CameraRig {
       this.pitchTarget = target;
       return;
     }
-    const step = delta * (1 - Math.exp(-gain * deltaTime));
+    const step = expBlend(0, delta, gain, deltaTime);
     this.pitchTarget = clamp(this.pitchTarget + step, limits.min, limits.max);
   }
 
   recenter(yaw?: number): void {
-    const desired = typeof yaw === 'number' ? yaw : this.lastDesiredForwardYaw;
+    const desired = typeof yaw === "number" ? yaw : this.lastDesiredForwardYaw;
     this.yawTarget = normaliseAngle(desired);
   }
 
   tick(deltaTime: number, context: CameraTickContext = {}): void {
     const dt = Math.max(deltaTime, 0);
+
+    const desiredForwardYaw =
+      typeof context.desiredForwardYaw === "number"
+        ? normaliseAngle(context.desiredForwardYaw)
+        : this.lastDesiredForwardYaw;
+
+    if (typeof context.desiredForwardYaw === "number") {
+      this.lastDesiredForwardYaw = desiredForwardYaw;
+    }
+
     const hasInput = context.hasCamInput ?? this.hadInputThisFrame;
     const isMoving = context.isMoving ?? false;
-    if (typeof context.desiredForwardYaw === 'number') {
-      this.lastDesiredForwardYaw = context.desiredForwardYaw;
-    }
+    const timeSinceCamInput =
+      context.timeSinceCamInput ?? (hasInput ? 0 : Number.POSITIVE_INFINITY);
 
-    if (this.followTarget) {
-      this.followTarget.getWorldPosition(this.targetPivot);
-      this.targetPivot.add(this.pivotOffset);
-    }
-
-    if (!this.pivotInitialised) {
-      this.currentPivot.copy(this.targetPivot);
-      this.pivotInitialised = true;
-    }
-
-    expSmoothingVector(this.currentPivot, this.targetPivot, this.positionLag, dt);
-    this.root.position.copy(this.currentPivot);
+    this.updateFollowTarget(dt);
 
     this.updateShoulderOffsetForMode();
     this.shoulderNode.position.copy(this.currentShoulderOffset);
 
-    this.handleAutoRecentre(dt, hasInput, isMoving);
-
-    this.yawCurrent = expSmoothingAngle(this.yawCurrent, this.yawTarget, this.rotationLag, dt);
-    this.pitchCurrent = expSmoothing(this.pitchCurrent, this.pitchTarget, this.rotationLag, dt);
-
-    const limits = this.getPitchLimits();
-    this.pitchCurrent = clamp(this.pitchCurrent, limits.min, limits.max);
-
-    this.yawNode.rotation.y = this.yawCurrent;
-    this.pitchNode.rotation.x = this.pitchCurrent;
-
-    this.root.updateMatrixWorld(true);
-
-    if (this.mode === 'chase') {
-      this.applyChaseCamera(dt);
+    if (this.mode === "chase") {
+      this.tickTPS(dt, {
+        hasCamInput: hasInput,
+        isMoving,
+        desiredForwardYaw,
+        timeSinceCamInput,
+      });
     } else {
-      this.applyFpvCamera(dt);
+      this.tickFPV(dt);
     }
 
     this.camera.updateMatrixWorld(true);
@@ -374,59 +383,156 @@ export class CameraRig {
     return this.camera.getWorldDirection(out).normalize();
   }
 
-  private handleAutoRecentre(deltaTime: number, hasInput: boolean, isMoving: boolean): void {
-    if (this.mode !== 'chase' || !this.tuning.tps.autoRecentreEnabled) {
-      this.autoRecentreTimer = 0;
-      return;
+  private updateFollowTarget(deltaTime: number): void {
+    if (this.followTarget) {
+      this.followTarget.getWorldPosition(this.targetPivot);
+      this.targetPivot.add(this.pivotOffset);
     }
-    if (hasInput || !isMoving) {
-      this.autoRecentreTimer = 0;
+
+    if (!this.pivotInitialised) {
+      this.currentPivot.copy(this.targetPivot);
+      this.pivotInitialised = true;
+    }
+
+    expSmoothingVector(
+      this.currentPivot,
+      this.targetPivot,
+      this.positionLag,
+      deltaTime
+    );
+    this.root.position.copy(this.currentPivot);
+  }
+
+  private tickTPS(deltaTime: number, policy: TpsPolicyContext): void {
+    this.applyYawAlignment(deltaTime, policy);
+
+    const limits = this.tuning.tps.pitchRange;
+    this.pitchTarget = clamp(this.pitchTarget, limits.min, limits.max);
+
+    this.yawCurrent = expSmoothingAngle(
+      this.yawCurrent,
+      this.yawTarget,
+      this.rotationLag,
+      deltaTime
+    );
+    this.pitchCurrent = expSmoothing(
+      this.pitchCurrent,
+      this.pitchTarget,
+      this.rotationLag,
+      deltaTime
+    );
+    this.pitchCurrent = clamp(this.pitchCurrent, limits.min, limits.max);
+
+    this.yawNode.rotation.y = this.yawCurrent;
+    this.pitchNode.rotation.x = this.pitchCurrent;
+
+    this.root.updateMatrixWorld(true);
+    this.applyChaseCamera(deltaTime);
+  }
+
+  private tickFPV(deltaTime: number): void {
+    const limits = this.tuning.fpv.pitchRange;
+    this.pitchTarget = clamp(this.pitchTarget, limits.min, limits.max);
+
+    this.yawCurrent = expSmoothingAngle(
+      this.yawCurrent,
+      this.yawTarget,
+      this.rotationLag,
+      deltaTime
+    );
+    this.pitchCurrent = expSmoothing(
+      this.pitchCurrent,
+      this.pitchTarget,
+      this.rotationLag,
+      deltaTime
+    );
+    this.pitchCurrent = clamp(this.pitchCurrent, limits.min, limits.max);
+
+    this.yawNode.rotation.y = this.yawCurrent;
+    this.pitchNode.rotation.x = this.pitchCurrent;
+
+    this.root.updateMatrixWorld(true);
+    this.applyFpvCamera(deltaTime);
+  }
+
+  private applyYawAlignment(deltaTime: number, policy: TpsPolicyContext): void {
+    const { hasCamInput, isMoving, desiredForwardYaw, timeSinceCamInput } =
+      policy;
+
+    if (hasCamInput || !isMoving) {
       return;
     }
 
-    this.autoRecentreTimer += deltaTime;
-    if (this.autoRecentreTimer < this.tuning.tps.autoRecentreGrace) {
+    if (timeSinceCamInput < this.tuning.tps.idleGraceSeconds) {
       return;
     }
 
-    const targetYaw = this.lastDesiredForwardYaw;
+    const targetYaw = normaliseAngle(desiredForwardYaw);
     const delta = shortestAngleDiff(this.yawTarget, targetYaw);
     if (Math.abs(delta) < EPSILON) {
       return;
     }
-    const step = delta * (1 - Math.exp(-this.tuning.tps.autoRecentreYawGain * deltaTime));
+
+    const step = expBlend(0, delta, this.tuning.tps.yawAlignGain, deltaTime);
     this.yawTarget = normaliseAngle(this.yawTarget + step);
   }
 
   private applyChaseCamera(deltaTime: number): void {
-    const desiredLength = Math.max(this.tuning.tps.collisionMinDistance, this.armLengthTarget);
+    const desiredLength = Math.max(
+      this.tuning.tps.minArmLength,
+      this.armLengthTarget
+    );
 
     const springOrigin = this.pitchNode.getWorldPosition(this.tempVecA);
-    const desiredPoint = this.pitchNode.localToWorld(this.tempVecB.set(0, 0, desiredLength));
+    const desiredPoint = this.pitchNode.localToWorld(
+      this.tempVecB.set(0, 0, desiredLength)
+    );
 
     let allowedLength = desiredLength;
     if (this.scene) {
-      allowedLength = this.collision.probe(springOrigin, desiredPoint, this.collisionIgnore);
+      allowedLength = this.collision.probe(
+        springOrigin,
+        desiredPoint,
+        this.collisionIgnore
+      );
     }
 
-    allowedLength = clamp(allowedLength, this.tuning.tps.collisionMinDistance, desiredLength);
-    this.armLengthCurrent = expSmoothing(this.armLengthCurrent, allowedLength, this.tuning.tps.positionLagGain, deltaTime);
+    allowedLength = clamp(
+      allowedLength,
+      this.tuning.tps.minArmLength,
+      desiredLength
+    );
+    this.armLengthCurrent = expSmoothing(
+      this.armLengthCurrent,
+      allowedLength,
+      this.tuning.tps.positionLagGain,
+      deltaTime
+    );
 
     this.camera.position.set(0, 0, this.armLengthCurrent);
   }
 
   private applyFpvCamera(deltaTime: number): void {
     this.armLengthTarget = this.tuning.fpv.forwardOffset;
-    this.armLengthCurrent = expSmoothing(this.armLengthCurrent, this.armLengthTarget, this.tuning.fpv.positionLagGain, deltaTime);
+    this.armLengthCurrent = expSmoothing(
+      this.armLengthCurrent,
+      this.armLengthTarget,
+      this.tuning.fpv.positionLagGain,
+      deltaTime
+    );
     this.camera.position.set(0, 0, this.armLengthCurrent);
   }
 
   private applyModeSettings(mode: CameraMode): void {
-    if (mode === 'chase') {
+    if (mode === "chase") {
       this.rotationLag = this.tuning.tps.rotationLagGain;
       this.positionLag = this.tuning.tps.positionLagGain;
       this.armLengthTarget = this.tuning.tps.armLength;
-      this.pitchTarget = clamp(this.pitchTarget, this.tuning.tps.pitchRange.min, this.tuning.tps.pitchRange.max);
+      this.pitchTarget = clamp(
+        this.pitchTarget,
+        this.tuning.tps.pitchRange.min,
+        this.tuning.tps.pitchRange.max
+      );
       if (Math.abs(this.pitchTarget) < EPSILON) {
         this.pitchTarget = DEFAULT_CHASE_PITCH;
       }
@@ -436,10 +542,17 @@ export class CameraRig {
       this.rotationLag = this.tuning.fpv.rotationLagGain;
       this.positionLag = this.tuning.fpv.positionLagGain;
       this.armLengthTarget = this.tuning.fpv.forwardOffset;
-      this.pitchTarget = clamp(this.pitchTarget, this.tuning.fpv.pitchRange.min, this.tuning.fpv.pitchRange.max);
-      this.pitchCurrent = clamp(this.pitchCurrent, this.tuning.fpv.pitchRange.min, this.tuning.fpv.pitchRange.max);
+      this.pitchTarget = clamp(
+        this.pitchTarget,
+        this.tuning.fpv.pitchRange.min,
+        this.tuning.fpv.pitchRange.max
+      );
+      this.pitchCurrent = clamp(
+        this.pitchCurrent,
+        this.tuning.fpv.pitchRange.min,
+        this.tuning.fpv.pitchRange.max
+      );
       this.updateShoulderOffsetForMode();
-      this.autoRecentreTimer = 0;
     }
     this.armLengthCurrent = this.armLengthTarget;
     this.applyFov();
@@ -447,7 +560,8 @@ export class CameraRig {
   }
 
   private applyFov(): void {
-    const next = this.mode === 'chase' ? this.tuning.tps.fov : this.tuning.fpv.fov;
+    const next =
+      this.mode === "chase" ? this.tuning.tps.fov : this.tuning.fpv.fov;
     if (Math.abs(this.camera.fov - next) > EPSILON) {
       this.camera.fov = next;
       this.camera.updateProjectionMatrix();
@@ -455,15 +569,20 @@ export class CameraRig {
   }
 
   private getPitchLimits(): { min: number; max: number } {
-    return this.mode === 'chase' ? this.tuning.tps.pitchRange : this.tuning.fpv.pitchRange;
+    return this.mode === "chase"
+      ? this.tuning.tps.pitchRange
+      : this.tuning.fpv.pitchRange;
   }
 
   private updateShoulderOffsetForMode(): void {
-    if (this.mode === 'chase') {
+    if (this.mode === "chase") {
       this.currentShoulderOffset.copy(this.tpsShoulderOffset);
       return;
     }
-    const eyeOffset = Math.max(this.eyeHeight - this.tuning.tps.pivotOffsetY, 0.1);
+    const eyeOffset = Math.max(
+      this.eyeHeight - this.tuning.tps.pivotOffsetY,
+      0.1
+    );
     this.currentShoulderOffset.set(0, eyeOffset, 0);
   }
 
@@ -481,16 +600,19 @@ export class CameraRig {
         this.characterHeight = this.tempSize.y;
       }
     }
-    this.eyeHeight = Math.max(this.characterHeight * this.tuning.fpv.eyeHeightFactor, this.tuning.tps.pivotOffsetY + 0.3);
+    this.eyeHeight = Math.max(
+      this.characterHeight * this.tuning.fpv.eyeHeightFactor,
+      this.tuning.tps.pivotOffsetY + 0.3
+    );
   }
 
   private updateCollisionIgnore(): void {
     this.collisionIgnore.clear();
-    this.root.traverse(object => {
+    this.root.traverse((object) => {
       this.collisionIgnore.add(object);
     });
     if (this.followTarget) {
-      this.followTarget.traverse(object => {
+      this.followTarget.traverse((object) => {
         this.collisionIgnore.add(object);
       });
     }
@@ -506,41 +628,38 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normaliseAngle(angle: number): number {
-  let result = angle % PI2;
-  if (result <= -Math.PI) {
-    result += PI2;
-  } else if (result > Math.PI) {
-    result -= PI2;
-  }
-  return result;
+function expSmoothing(
+  current: number,
+  target: number,
+  gain: number,
+  deltaTime: number
+): number {
+  return expBlend(current, target, gain, deltaTime);
 }
 
-function shortestAngleDiff(from: number, to: number): number {
-  return normaliseAngle(to - from);
-}
-
-function expSmoothing(current: number, target: number, gain: number, deltaTime: number): number {
-  if (gain <= 0 || deltaTime <= 0) {
-    return target;
-  }
-  const factor = 1 - Math.exp(-gain * deltaTime);
-  return current + (target - current) * factor;
-}
-
-function expSmoothingAngle(current: number, target: number, gain: number, deltaTime: number): number {
+function expSmoothingAngle(
+  current: number,
+  target: number,
+  gain: number,
+  deltaTime: number
+): number {
   if (gain <= 0 || deltaTime <= 0) {
     return normaliseAngle(target);
   }
   const delta = shortestAngleDiff(current, target);
-  const factor = 1 - Math.exp(-gain * deltaTime);
   if (Math.abs(delta) < EPSILON) {
     return normaliseAngle(target);
   }
-  return normaliseAngle(current + delta * factor);
+  const step = expBlend(0, delta, gain, deltaTime);
+  return normaliseAngle(current + step);
 }
 
-function expSmoothingVector(current: THREE.Vector3, target: THREE.Vector3, gain: number, deltaTime: number): void {
+function expSmoothingVector(
+  current: THREE.Vector3,
+  target: THREE.Vector3,
+  gain: number,
+  deltaTime: number
+): void {
   if (gain <= 0 || deltaTime <= 0) {
     current.copy(target);
     return;
@@ -553,7 +672,10 @@ function degToRad(value: number): number {
   return (Math.PI / 180) * value;
 }
 
-function shouldIgnore(object: THREE.Object3D, ignore: Set<THREE.Object3D>): boolean {
+function shouldIgnore(
+  object: THREE.Object3D,
+  ignore: Set<THREE.Object3D>
+): boolean {
   let current: THREE.Object3D | null = object;
   while (current) {
     if (ignore.has(current)) {
@@ -567,5 +689,5 @@ function shouldIgnore(object: THREE.Object3D, ignore: Set<THREE.Object3D>): bool
 export const cameraUtils = {
   normaliseAngle,
   shortestAngleDiff,
-  expSmoothing
+  expBlend,
 };

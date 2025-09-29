@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 import type { Game } from './Game';
-import type { CharacterOptions, CharacterState, ModelDefinition } from './types';
+import type { CharacterOptions, CharacterState, ModelDefinition, CharacterKind } from './types';
+
+const VELOCITY_EPSILON = 1e-5;
 
 interface AnimationOptions {
   walkSpeed?: number;
@@ -39,6 +41,7 @@ export class Character {
     speed: 0
   };
 
+  private readonly tempDirection = new THREE.Vector3();
   protected readonly animation: AnimationState;
   protected readonly modelClone: THREE.Object3D;
   public readonly kind: CharacterKind;
@@ -116,10 +119,23 @@ export class Character {
     return this.state.speed;
   }
 
+  setVelocity(velocity: THREE.Vector3): void {
+    this.state.velocity.copy(velocity);
+  }
+
+  clearVelocity(): void {
+    this.state.velocity.set(0, 0, 0);
+  }
+
   update(deltaTime: number): void {
-    const direction = new THREE.Vector3();
-    this.object.getWorldDirection(direction);
-    this.object.position.addScaledVector(direction, this.state.speed);
+    const velocity = this.state.velocity;
+    if (velocity.lengthSq() > VELOCITY_EPSILON * VELOCITY_EPSILON) {
+      this.object.position.add(velocity);
+      velocity.set(0, 0, 0);
+    } else if (Math.abs(this.state.speed) > VELOCITY_EPSILON) {
+      this.object.getWorldDirection(this.tempDirection);
+      this.object.position.addScaledVector(this.tempDirection, this.state.speed);
+    }
 
     this.animation.mixer.update(deltaTime);
   }

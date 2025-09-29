@@ -1,5 +1,5 @@
-export type CameraMode = 'chase' | 'fpv';
-export type SnapPreference = 'off' | 'chase' | 'fpv';
+export type CameraMode = "chase" | "fpv";
+export type SnapPreference = "off" | "chase" | "fpv";
 
 export interface ControlSettings {
   deadZone: number;
@@ -38,10 +38,9 @@ export interface CameraTuning {
     positionLagGain: number;
     rotationLagGain: number;
     collisionRadius: number;
-    collisionMinDistance: number;
-    autoRecentreEnabled: boolean;
-    autoRecentreGrace: number;
-    autoRecentreYawGain: number;
+    minArmLength: number;
+    idleGraceSeconds: number;
+    yawAlignGain: number;
     pitchRange: CameraAngleRange;
   };
   fpv: {
@@ -66,60 +65,59 @@ const DEFAULT_SETTINGS: ControlSettings = {
   snapFpvStrength: 3.5,
   leftHanded: false,
   safeMarginPx: 16,
-  buttonsMarginPx: 24
+  buttonsMarginPx: 24,
 };
 
 export const Controls: ControlSettings = { ...DEFAULT_SETTINGS };
 
 const DEFAULT_CAMERA_TUNING: CameraTuning = {
   tps: {
-    fov: 82,
-    armLength: 4.5,
-    shoulderOffset: { x: 0.72, y: 1.05, z: 0 },
-    pivotOffsetY: 1.1,
+    fov: 75,
+    armLength: 15,
+    shoulderOffset: { x: 0, y: 3, z: 0 },
+    pivotOffsetY: 3,
     positionLagGain: 8.5,
-    rotationLagGain: 12,
-    collisionRadius: 0.26,
-    collisionMinDistance: 0.55,
-    autoRecentreEnabled: true,
-    autoRecentreGrace: 0.65,
-    autoRecentreYawGain: 6.0,
+    rotationLagGain: 12.5,
+    collisionRadius: 0.28,
+    minArmLength: 0.6,
+    idleGraceSeconds: 0.6,
+    yawAlignGain: 8.2,
     pitchRange: {
-      min: degToRad(-60),
-      max: degToRad(40)
-    }
+      min: degToRad(-45),
+      max: degToRad(45),
+    },
   },
   fpv: {
-    fov: 96,
+    fov: 94,
     eyeHeightFactor: 0.92,
     forwardOffset: 0.12,
     positionLagGain: 14,
     rotationLagGain: 16,
     pitchRange: {
-      min: degToRad(-75),
-      max: degToRad(75)
-    }
-  }
+      min: degToRad(-80),
+      max: degToRad(80),
+    },
+  },
 };
 
 const cameraTuning: CameraTuning = {
   tps: {
     ...DEFAULT_CAMERA_TUNING.tps,
     shoulderOffset: { ...DEFAULT_CAMERA_TUNING.tps.shoulderOffset },
-    pitchRange: { ...DEFAULT_CAMERA_TUNING.tps.pitchRange }
+    pitchRange: { ...DEFAULT_CAMERA_TUNING.tps.pitchRange },
   },
   fpv: {
     ...DEFAULT_CAMERA_TUNING.fpv,
-    pitchRange: { ...DEFAULT_CAMERA_TUNING.fpv.pitchRange }
-  }
+    pitchRange: { ...DEFAULT_CAMERA_TUNING.fpv.pitchRange },
+  },
 };
 
 const runtime: ControlRuntimeState = {
-  mode: 'chase',
+  mode: "chase",
   invertY: Controls.invertY,
   leftHanded: Controls.leftHanded,
   showJoysticks: false,
-  snap: 'chase'
+  snap: "chase",
 };
 
 let initialised = false;
@@ -134,12 +132,12 @@ export const getCameraTuning = (): CameraTuning => ({
   tps: {
     ...cameraTuning.tps,
     shoulderOffset: { ...cameraTuning.tps.shoulderOffset },
-    pitchRange: { ...cameraTuning.tps.pitchRange }
+    pitchRange: { ...cameraTuning.tps.pitchRange },
   },
   fpv: {
     ...cameraTuning.fpv,
-    pitchRange: { ...cameraTuning.fpv.pitchRange }
-  }
+    pitchRange: { ...cameraTuning.fpv.pitchRange },
+  },
 });
 
 export function initControls(search?: string): void {
@@ -150,25 +148,27 @@ export function initControls(search?: string): void {
   initialised = true;
   const params = createParams(search);
 
-  const parsedMode = parseCameraMode(params.get('mode')) ?? parseCameraMode(params.get('cameraMode'));
+  const parsedMode =
+    parseCameraMode(params.get("mode")) ??
+    parseCameraMode(params.get("cameraMode"));
   if (parsedMode) {
     runtime.mode = parsedMode;
   }
 
-  if (params.get('invertY') === '1') {
+  if (params.get("invertY") === "1") {
     runtime.invertY = true;
   }
 
-  if (params.get('lefty') === '1') {
+  if (params.get("lefty") === "1") {
     runtime.leftHanded = true;
   }
 
-  const parsedSnap = parseSnapPreference(params.get('snap'));
+  const parsedSnap = parseSnapPreference(params.get("snap"));
   if (parsedSnap) {
     runtime.snap = parsedSnap;
   }
 
-  const forceJoysticks = params.get('joysticks') === '1';
+  const forceJoysticks = params.get("joysticks") === "1";
   runtime.showJoysticks = detectTouch() || forceJoysticks;
 
   Controls.invertY = runtime.invertY;
@@ -200,133 +200,245 @@ export function setInvertY(invertY: boolean): void {
 }
 
 export function isSnapEnabledFor(mode: CameraMode): boolean {
-  if (runtime.snap === 'off') {
+  if (runtime.snap === "off") {
     return false;
   }
-  if (runtime.snap === 'chase') {
-    return mode === 'chase';
+  if (runtime.snap === "chase") {
+    return mode === "chase";
   }
-  if (runtime.snap === 'fpv') {
-    return mode === 'fpv';
+  if (runtime.snap === "fpv") {
+    return mode === "fpv";
   }
   return false;
 }
 
 export function getSnapGainFor(mode: CameraMode): number {
-  return mode === 'chase' ? Controls.snapChaseStrength : Controls.snapFpvStrength;
+  return mode === "chase"
+    ? Controls.snapChaseStrength
+    : Controls.snapFpvStrength;
 }
 
 const createParams = (search?: string): URLSearchParams => {
-  if (typeof search === 'string') {
+  if (typeof search === "string") {
     return new URLSearchParams(search);
   }
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     return new URLSearchParams(window.location.search);
   }
-  return new URLSearchParams('');
+  return new URLSearchParams("");
 };
 
 const parseCameraMode = (value: string | null): CameraMode | null => {
-  if (value === 'chase' || value === 'fpv') {
+  if (value === "chase" || value === "fpv") {
     return value;
   }
   return null;
 };
 
 const parseSnapPreference = (value: string | null): SnapPreference | null => {
-  if (value === 'off' || value === 'chase' || value === 'fpv') {
+  if (value === "off" || value === "chase" || value === "fpv") {
     return value;
   }
   return null;
 };
 
 const detectTouch = (): boolean => {
-  if (typeof navigator === 'undefined') {
+  if (typeof navigator === "undefined") {
     return false;
   }
   return navigator.maxTouchPoints > 0;
 };
 
 function applyCameraParams(params: URLSearchParams): void {
-  assignNumber(params, 'fovTPS', value => {
+  assignNumber(params, "fovTPS", (value) => {
     cameraTuning.tps.fov = clampNumber(value, 60, 110, cameraTuning.tps.fov);
   });
-  assignNumber(params, 'fovFPV', value => {
+  assignNumber(params, "fovFPV", (value) => {
     cameraTuning.fpv.fov = clampNumber(value, 80, 120, cameraTuning.fpv.fov);
   });
-  assignNumber(params, 'armLen', value => {
-    cameraTuning.tps.armLength = clampNumber(value, 2.5, 8, cameraTuning.tps.armLength);
+  assignNumber(params, "armLen", (value) => {
+    cameraTuning.tps.armLength = clampNumber(
+      value,
+      2.5,
+      8,
+      cameraTuning.tps.armLength
+    );
   });
-  assignNumber(params, 'shoulderX', value => {
-    cameraTuning.tps.shoulderOffset.x = clampNumber(value, -2, 2, cameraTuning.tps.shoulderOffset.x);
+  assignNumber(params, "shoulderX", (value) => {
+    cameraTuning.tps.shoulderOffset.x = clampNumber(
+      value,
+      -2,
+      2,
+      cameraTuning.tps.shoulderOffset.x
+    );
   });
-  assignNumber(params, 'shoulderY', value => {
-    cameraTuning.tps.shoulderOffset.y = clampNumber(value, -2, 3, cameraTuning.tps.shoulderOffset.y);
+  assignNumber(params, "shoulderY", (value) => {
+    cameraTuning.tps.shoulderOffset.y = clampNumber(
+      value,
+      -2,
+      3,
+      cameraTuning.tps.shoulderOffset.y
+    );
   });
-  assignNumber(params, 'shoulderZ', value => {
-    cameraTuning.tps.shoulderOffset.z = clampNumber(value, -2, 2, cameraTuning.tps.shoulderOffset.z);
+  assignNumber(params, "shoulderZ", (value) => {
+    cameraTuning.tps.shoulderOffset.z = clampNumber(
+      value,
+      -2,
+      2,
+      cameraTuning.tps.shoulderOffset.z
+    );
   });
-  assignNumber(params, 'pivotY', value => {
-    cameraTuning.tps.pivotOffsetY = clampNumber(value, -2, 3, cameraTuning.tps.pivotOffsetY);
+  assignNumber(params, "pivotY", (value) => {
+    cameraTuning.tps.pivotOffsetY = clampNumber(
+      value,
+      -2,
+      3,
+      cameraTuning.tps.pivotOffsetY
+    );
   });
-  assignNumber(params, 'tpsPosLag', value => {
-    cameraTuning.tps.positionLagGain = clampNumber(value, 1, 30, cameraTuning.tps.positionLagGain);
+  assignNumber(params, "tpsPosLag", (value) => {
+    cameraTuning.tps.positionLagGain = clampNumber(
+      value,
+      1,
+      30,
+      cameraTuning.tps.positionLagGain
+    );
   });
-  assignNumber(params, 'tpsRotLag', value => {
-    cameraTuning.tps.rotationLagGain = clampNumber(value, 1, 40, cameraTuning.tps.rotationLagGain);
+  assignNumber(params, "tpsRotLag", (value) => {
+    cameraTuning.tps.rotationLagGain = clampNumber(
+      value,
+      1,
+      40,
+      cameraTuning.tps.rotationLagGain
+    );
   });
-  assignNumber(params, 'yawGain', value => {
-    cameraTuning.tps.rotationLagGain = clampNumber(value, 1, 40, cameraTuning.tps.rotationLagGain);
+  assignNumber(params, "yawGain", (value) => {
+    cameraTuning.tps.rotationLagGain = clampNumber(
+      value,
+      1,
+      40,
+      cameraTuning.tps.rotationLagGain
+    );
   });
-  assignNumber(params, 'posGain', value => {
-    cameraTuning.tps.positionLagGain = clampNumber(value, 1, 30, cameraTuning.tps.positionLagGain);
+  assignNumber(params, "posGain", (value) => {
+    cameraTuning.tps.positionLagGain = clampNumber(
+      value,
+      1,
+      30,
+      cameraTuning.tps.positionLagGain
+    );
   });
-  assignNumber(params, 'collisionRadius', value => {
-    cameraTuning.tps.collisionRadius = clampNumber(value, 0.05, 1, cameraTuning.tps.collisionRadius);
+  assignNumber(params, "collisionRadius", (value) => {
+    cameraTuning.tps.collisionRadius = clampNumber(
+      value,
+      0.05,
+      1,
+      cameraTuning.tps.collisionRadius
+    );
   });
-  assignNumber(params, 'collisionMin', value => {
-    cameraTuning.tps.collisionMinDistance = clampNumber(value, 0.1, 2, cameraTuning.tps.collisionMinDistance);
+  assignNumber(params, "collisionMin", (value) => {
+    cameraTuning.tps.minArmLength = clampNumber(
+      value,
+      0.2,
+      2,
+      cameraTuning.tps.minArmLength
+    );
   });
-  assignNumber(params, 'idleGrace', value => {
-    cameraTuning.tps.autoRecentreGrace = clampNumber(value, 0, 5, cameraTuning.tps.autoRecentreGrace);
+  assignNumber(params, "minArm", (value) => {
+    cameraTuning.tps.minArmLength = clampNumber(
+      value,
+      0.2,
+      2,
+      cameraTuning.tps.minArmLength
+    );
   });
-  assignNumber(params, 'yawAlignGain', value => {
-    cameraTuning.tps.autoRecentreYawGain = clampNumber(value, 0, 40, cameraTuning.tps.autoRecentreYawGain);
+  assignNumber(params, "idleGrace", (value) => {
+    cameraTuning.tps.idleGraceSeconds = clampNumber(
+      value,
+      0,
+      5,
+      cameraTuning.tps.idleGraceSeconds
+    );
   });
-  assignNumber(params, 'pitchMin', value => {
-    cameraTuning.tps.pitchRange.min = clampNumber(degToRad(value), degToRad(-89), degToRad(0), cameraTuning.tps.pitchRange.min);
+  assignNumber(params, "yawAlignGain", (value) => {
+    cameraTuning.tps.yawAlignGain = clampNumber(
+      value,
+      0,
+      40,
+      cameraTuning.tps.yawAlignGain
+    );
   });
-  assignNumber(params, 'pitchMax', value => {
-    cameraTuning.tps.pitchRange.max = clampNumber(degToRad(value), degToRad(-5), degToRad(89), cameraTuning.tps.pitchRange.max);
+  assignNumber(params, "pitchMin", (value) => {
+    cameraTuning.tps.pitchRange.min = clampNumber(
+      degToRad(value),
+      degToRad(-89),
+      degToRad(0),
+      cameraTuning.tps.pitchRange.min
+    );
   });
-  assignNumber(params, 'fpvPitchMin', value => {
-    cameraTuning.fpv.pitchRange.min = clampNumber(degToRad(value), degToRad(-89), degToRad(0), cameraTuning.fpv.pitchRange.min);
+  assignNumber(params, "pitchMax", (value) => {
+    cameraTuning.tps.pitchRange.max = clampNumber(
+      degToRad(value),
+      degToRad(-5),
+      degToRad(89),
+      cameraTuning.tps.pitchRange.max
+    );
   });
-  assignNumber(params, 'fpvPitchMax', value => {
-    cameraTuning.fpv.pitchRange.max = clampNumber(degToRad(value), degToRad(0), degToRad(89), cameraTuning.fpv.pitchRange.max);
+  assignNumber(params, "fpvPitchMin", (value) => {
+    cameraTuning.fpv.pitchRange.min = clampNumber(
+      degToRad(value),
+      degToRad(-89),
+      degToRad(0),
+      cameraTuning.fpv.pitchRange.min
+    );
   });
-  assignNumber(params, 'eyeHeight', value => {
-    cameraTuning.fpv.eyeHeightFactor = clampNumber(value, 0.5, 1.5, cameraTuning.fpv.eyeHeightFactor);
+  assignNumber(params, "fpvPitchMax", (value) => {
+    cameraTuning.fpv.pitchRange.max = clampNumber(
+      degToRad(value),
+      degToRad(0),
+      degToRad(89),
+      cameraTuning.fpv.pitchRange.max
+    );
   });
-  assignNumber(params, 'fpvForward', value => {
-    cameraTuning.fpv.forwardOffset = clampNumber(value, -1, 1, cameraTuning.fpv.forwardOffset);
+  assignNumber(params, "eyeHeight", (value) => {
+    cameraTuning.fpv.eyeHeightFactor = clampNumber(
+      value,
+      0.5,
+      1.5,
+      cameraTuning.fpv.eyeHeightFactor
+    );
   });
-  assignNumber(params, 'fpvPosLag', value => {
-    cameraTuning.fpv.positionLagGain = clampNumber(value, 1, 40, cameraTuning.fpv.positionLagGain);
+  assignNumber(params, "fpvForward", (value) => {
+    cameraTuning.fpv.forwardOffset = clampNumber(
+      value,
+      -1,
+      1,
+      cameraTuning.fpv.forwardOffset
+    );
   });
-  assignNumber(params, 'fpvRotLag', value => {
-    cameraTuning.fpv.rotationLagGain = clampNumber(value, 1, 60, cameraTuning.fpv.rotationLagGain);
+  assignNumber(params, "fpvPosLag", (value) => {
+    cameraTuning.fpv.positionLagGain = clampNumber(
+      value,
+      1,
+      40,
+      cameraTuning.fpv.positionLagGain
+    );
   });
-
-  const autoRecentreParam = params.get('tpsAutoRecentre');
-  if (autoRecentreParam === 'off') {
-    cameraTuning.tps.autoRecentreEnabled = false;
-  } else if (autoRecentreParam === 'on') {
-    cameraTuning.tps.autoRecentreEnabled = true;
-  }
+  assignNumber(params, "fpvRotLag", (value) => {
+    cameraTuning.fpv.rotationLagGain = clampNumber(
+      value,
+      1,
+      60,
+      cameraTuning.fpv.rotationLagGain
+    );
+  });
 }
 
-function assignNumber(params: URLSearchParams, key: string, apply: (value: number) => void): void {
+function assignNumber(
+  params: URLSearchParams,
+  key: string,
+  apply: (value: number) => void
+): void {
   const value = params.get(key);
   if (value === null) {
     return;
@@ -338,7 +450,12 @@ function assignNumber(params: URLSearchParams, key: string, apply: (value: numbe
   apply(parsed);
 }
 
-function clampNumber(value: number, min: number, max: number, fallback: number): number {
+function clampNumber(
+  value: number,
+  min: number,
+  max: number,
+  fallback: number
+): number {
   if (!Number.isFinite(value)) {
     return fallback;
   }

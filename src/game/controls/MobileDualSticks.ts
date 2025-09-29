@@ -163,11 +163,7 @@ export class MobileDualSticks {
       return 0;
     }
 
-    const mode = getCameraMode();
     const cameraForward = cameraRig.getForward(this.forward);
-    if (mode === 'chase') {
-      cameraForward.multiplyScalar(-1);
-    }
     cameraForward.y = 0;
     if (cameraForward.lengthSq() < 1e-5) {
       cameraForward.set(0, 0, -1);
@@ -179,7 +175,7 @@ export class MobileDualSticks {
     this.moveVector
       .copy(cameraRight)
       .multiplyScalar(-this.leftValue.x)
-      .addScaledVector(cameraForward, this.leftValue.y);
+      .addScaledVector(cameraForward, -this.leftValue.y);
 
     const magnitude = this.moveVector.length();
     if (magnitude < 1e-5) {
