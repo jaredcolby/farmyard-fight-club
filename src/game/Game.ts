@@ -437,13 +437,9 @@ export class Game {
       input.actions.secondary =
         input.actions.secondary || mobileActions.secondary;
       input.actions.jump = input.actions.jump || mobileActions.jump;
-      mobileMagnitude = this.mobileSticks.applyMovement(
-        this.player,
-        this.cameraRig,
-        deltaTime
-      );
+      mobileMagnitude = this.mobileSticks.applyMovement(input);
       mobileCameraInput =
-        this.mobileSticks.applyCamera(this.player, this.cameraRig, deltaTime) ||
+        this.mobileSticks.applyCamera(input, this.cameraRig, deltaTime) ||
         mobileCameraInput;
     }
 
@@ -538,19 +534,6 @@ export class Game {
       return usedCameraInput;
     }
 
-    if (mobileMagnitude > 0) {
-      const intensity = clamp(mobileMagnitude, 0, 1);
-      const timeScale = Math.max(0.5, intensity);
-      this.player.changeState("walk", {
-        walkSpeed: intensity,
-        timeScale,
-        force: true,
-      });
-      this.handleWalkAudio(timeScale);
-      this.player.clearVelocity();
-      return usedCameraInput;
-    }
-
     this.player.clearVelocity();
 
     const movementDeadZone = Controls.deadZone ?? 0.12;
@@ -595,20 +578,6 @@ export class Game {
     }
 
     return usedCameraInput;
-  }
-
-  private applyStrafe(amount: number): void {
-    const clamped = clamp(amount, -1, 1);
-    if (Math.abs(clamped) < 0.05) {
-      return;
-    }
-
-    this.player.object.getWorldDirection(this.tempForward);
-    this.tempRight.copy(this.tempForward).cross(this.up).normalize();
-    this.player.object.position.addScaledVector(
-      this.tempRight,
-      clamped * this.walkSpeed
-    );
   }
 
   private handleWalkAudio(rate: number): void {

@@ -16,7 +16,7 @@ import {
   setLeftHanded,
   shouldShowJoysticks
 } from '../../settings/controls';
-import type { InputActions } from '../../input/types';
+import type { InputActions, InputState } from '../../input/types';
 import { CameraRig } from '../camera/CameraRig';
 import { cameraUtils } from '../camera/CameraRig';
 import { Player } from '../Character';
@@ -45,10 +45,6 @@ export class MobileDualSticks {
   private readonly leftValue: StickValue = { x: 0, y: 0, magnitude: 0 };
   private readonly rightValue: StickValue = { x: 0, y: 0, magnitude: 0 };
   private readonly actions: InputActions = { primary: false, secondary: false, jump: false };
-  private readonly up = new THREE.Vector3(0, 1, 0);
-  private readonly forward = new THREE.Vector3();
-  private readonly right = new THREE.Vector3();
-  private readonly moveVector = new THREE.Vector3();
   private readonly tempHudSample: StickHudSample = {
     left: this.leftValue,
     right: this.rightValue,
@@ -158,45 +154,17 @@ export class MobileDualSticks {
     this.updateKeepOut();
   }
 
-  applyMovement(player: Player, cameraRig: CameraRig, deltaTime: number): number {
+  applyMovement(input: InputState): number {
     if (this.leftValue.magnitude < DEAD_ZONE) {
       return 0;
     }
 
-    const cameraForward = cameraRig.getForward(this.forward);
-    cameraForward.y = 0;
-    if (cameraForward.lengthSq() < 1e-5) {
-      cameraForward.set(0, 0, -1);
-    }
-    cameraForward.normalize();
-
-    const cameraRight = this.right.copy(cameraForward).cross(this.up).normalize();
-
-    this.moveVector
-      .copy(cameraRight)
-      .multiplyScalar(-this.leftValue.x)
-      .addScaledVector(cameraForward, -this.leftValue.y);
-
-    const magnitude = this.moveVector.length();
-    if (magnitude < 1e-5) {
-      return 0;
-    }
-
-    this.moveVector.multiplyScalar(1 / magnitude);
-
-    const displacement = Controls.moveSpeed * this.leftValue.magnitude * deltaTime;
-    player.object.position.addScaledVector(this.moveVector, displacement);
-
-    const targetYaw = Math.atan2(this.moveVector.x, -this.moveVector.z);
-    const currentYaw = cameraUtils.normaliseAngle(player.object.rotation.y);
-    const yawDelta = cameraUtils.shortestAngleDiff(currentYaw, targetYaw);
-    const rotationStep = yawDelta * (1 - Math.exp(-10 * deltaTime));
-    player.object.rotation.y = cameraUtils.normaliseAngle(currentYaw + rotationStep);
-
+    input.move.x += this.leftValue.x;
+    input.move.y += this.leftValue.y;
     return this.leftValue.magnitude;
   }
 
-  applyCamera(player: Player, cameraRig: CameraRig, deltaTime: number): boolean {
+  applyCamera(input: InputState, cameraRig: CameraRig, deltaTime: number): boolean {
     const mode = getCameraMode();
     cameraRig.setMode(mode);
 
@@ -207,11 +175,11 @@ export class MobileDualSticks {
     let usedInput = false;
     if (this.rightValue.magnitude >= DEAD_ZONE) {
       if (Math.abs(yawDelta) > 0) {
-        cameraRig.addYaw(yawDelta);
+        input.turn -= yawDelta;
         usedInput = true;
       }
       if (Math.abs(pitchDelta) > 0) {
-        cameraRig.addPitch(pitchDelta);
+        input.lookDelta.y -= pitchDelta;
         usedInput = true;
       }
       this.snapping = false;

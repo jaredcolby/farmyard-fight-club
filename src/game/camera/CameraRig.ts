@@ -123,6 +123,7 @@ export class CameraRig {
 
   private readonly tpsShoulderOffset = new THREE.Vector3();
   private readonly currentShoulderOffset = new THREE.Vector3();
+  private readonly targetCenterOffsetLocal = new THREE.Vector3();
   private armLengthTarget = 15;
   private armLengthCurrent = 15;
 
@@ -386,6 +387,12 @@ export class CameraRig {
   private updateFollowTarget(deltaTime: number): void {
     if (this.followTarget) {
       this.followTarget.getWorldPosition(this.targetPivot);
+      if (this.targetCenterOffsetLocal.lengthSq() > EPSILON) {
+        this.tempVecA.copy(this.targetCenterOffsetLocal);
+        this.followTarget.localToWorld(this.tempVecA);
+        this.tempVecA.sub(this.targetPivot);
+        this.targetPivot.add(this.tempVecA);
+      }
       this.targetPivot.add(this.pivotOffset);
     }
 
@@ -590,20 +597,39 @@ export class CameraRig {
     if (!target) {
       this.characterHeight = 1.8;
       this.eyeHeight = this.characterHeight * this.tuning.fpv.eyeHeightFactor;
+      this.targetCenterOffsetLocal.set(0, 0, 0);
       return;
     }
 
     this.tempBox.setFromObject(target);
+    this.targetCenterOffsetLocal.set(0, 0, 0);
     if (!this.tempBox.isEmpty()) {
       this.tempBox.getSize(this.tempSize);
       if (this.tempSize.y > EPSILON) {
         this.characterHeight = this.tempSize.y;
       }
+      this.tempBox.getCenter(this.tempVecA);
+      target.worldToLocal(this.tempVecA);
+      this.targetCenterOffsetLocal.copy(this.tempVecA);
+      this.targetCenterOffsetLocal.y = 6;
     }
     this.eyeHeight = Math.max(
       this.characterHeight * this.tuning.fpv.eyeHeightFactor,
       this.tuning.tps.pivotOffsetY + 0.3
     );
+
+    const desiredPivotY = THREE.MathUtils.clamp(
+      this.characterHeight * 0.5,
+      0.,
+      this.eyeHeight - 0.2
+    );
+    if (Math.abs(desiredPivotY - this.pivotOffset.y) > EPSILON) {
+      const delta = desiredPivotY - this.pivotOffset.y;
+      this.pivotOffset.y = desiredPivotY;
+      this.tuning.tps.pivotOffsetY = desiredPivotY;
+      this.targetPivot.y += delta;
+      this.currentPivot.y += delta;
+    }
   }
 
   private updateCollisionIgnore(): void {
