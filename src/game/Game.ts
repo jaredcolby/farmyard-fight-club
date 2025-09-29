@@ -559,7 +559,9 @@ export class Game {
 
     if (hasMoveInput) {
       const yaw = this.player.object.rotation.y;
-      this.tempForward.set(Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+      const sinYaw = Math.sin(yaw);
+      const cosYaw = Math.cos(yaw);
+      this.tempForward.set(-sinYaw, 0, -cosYaw).normalize();
       this.tempRight.copy(this.tempForward).cross(this.up).normalize();
 
       this.tempMove

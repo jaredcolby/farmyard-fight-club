@@ -48,11 +48,11 @@ export class KeyboardInput {
     let turn = 0;
 
     if (this.isPressed("arrowup") || this.isPressed("w")) {
-      moveY -= 1;
+      moveY += 1;
     }
 
     if (this.isPressed("arrowdown") || this.isPressed("s")) {
-      moveY += 1;
+      moveY -= 1;
     }
 
     if (this.isPressed("arrowleft") || this.isPressed("a")) {
